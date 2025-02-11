@@ -299,9 +299,10 @@ subroutine ADI_CalcOutput(t, u, p, x, xd, z, OtherState, y, m, errStat, errMsg)
 
    ! --- Set outputs
    !TODO: this assumes one rotor!!!
-   associate(AD_NumOuts => p%AD%rotors(1)%NumOuts + p%AD%rotors(1)%BldNd_TotNumOuts)
-      y%WriteOutput(1:AD_NumOuts) = y%AD%rotors(1)%WriteOutput(1:AD_NumOuts)
-      y%WriteOutput(AD_NumOuts+1:p%NumOuts) = y%IW_WriteOutput(1:m%IW%p%NumOuts)
+   associate(AD_NumOuts => p%AD%rotors(1)%NumOuts + p%AD%rotors(1)%BldNd_TotNumOuts, &
+             IW_NumOuts => m%IW%p%NumOuts)
+      y%WriteOutput(1:IW_NumOuts) = y%IW_WriteOutput(1:IW_NumOuts)
+      y%WriteOutput(IW_NumOuts+1:p%NumOuts) = y%AD%rotors(1)%WriteOutput(1:AD_NumOuts)
    end associate
 
    !----------------------------------------------------------------------------
@@ -387,6 +388,10 @@ subroutine ADI_InitInflowWind(Root, i_IW, u_AD, o_AD, IW, dt, InitOutData, errSt
       endif
       InitInData%RootName         = trim(Root)//'.IfW'
       InitInData%MHK              = i_IW%MHK
+      ! OLAF might be used in AD, in which case we need to allow out of bounds for some calcs. To do that
+      ! the average values for the entire wind profile must be calculated and stored (we don't know if OLAF
+      ! is used until after AD_Init below).
+      InitInData%BoxExceedAllow = .true.
       CALL InflowWind_Init( InitInData, IW%u, IW%p, &
                      IW%x, IW%xd, IW%z, IW%OtherSt, &
                      IW%y, IW%m, dt,  InitOutData, errStat2, errMsg2 )
@@ -558,7 +563,7 @@ subroutine Init_MeshMap_For_ADI(FED, p, uAD, errStat, errMsg)
             pos         = y_ED%TwrPtMesh%Position(:,1)
             orientation = y_ED%TwrPtMesh%RefOrientation(:,:,1)
             call Eye(orientation, errStat2, errMsg2)
-            call CreatePointMesh(y_ED%TwrPtMeshAD, pos, orientation, errStat2, errMsg2, hasMotion=.True., hasLoads=.False.); if(Failed())return
+            call CreateInputPointMesh(y_ED%TwrPtMeshAD, pos, orientation, errStat2, errMsg2, hasMotion=.True., hasLoads=.False.); if(Failed())return
 
             ! TowerBase to AD tower base
             call MeshMapCreate(y_ED%TwrPtMesh, y_ED%TwrPtMeshAD, y_ED%ED_P_2_AD_P_T, errStat2, errMsg2); if(Failed()) return

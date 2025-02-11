@@ -62,7 +62,7 @@ MODULE NWTC_IO
    CHARACTER(99)                 :: ProgVer  = ' '                               !< The version (including date) of the calling program. DO NOT USE THIS IN NEW PROGRAMS
    CHARACTER(1), PARAMETER       :: Tab      = CHAR( 9 )                         !< The tab character.
    CHARACTER(*), PARAMETER       :: CommChars = '!#%'                            !< Comment characters that mark the end of useful input
-   INTEGER(IntKi), PARAMETER     :: NWTC_SizeOfNumWord = 200                     !< maximum length of the words containing numeric input (for ParseVar routines)
+   INTEGER(IntKi), PARAMETER     :: NWTC_SizeOfNumWord = 256                     !< maximum length of the words containing numeric input (for ParseVar routines)
 
 
       ! Parameters for writing to echo files (in this module only)
@@ -1892,7 +1892,6 @@ END SUBROUTINE CheckR8Var
 
 
    END FUNCTION GetErrStr
-   
 !=======================================================================
 !> This function extracts the Name field from the ProgDesc data type
 !  and return it.
@@ -2061,7 +2060,7 @@ END SUBROUTINE CheckR8Var
 !! It uses spaces, tabs, commas, semicolons, single quotes, and double quotes ("whitespace")
 !! as word separators. If there aren't NumWords in the line, the remaining array elements will remain empty.
 !! Use CountWords (nwtc_io::countwords) to count the number of words in a line.
-   SUBROUTINE GetWords ( Line, Words, NumWords, NumFound )
+   SUBROUTINE GetWords ( Line, Words, NumWords, NumFound, IgnoreQuotes )
 
       ! Argument declarations.
 
@@ -2070,69 +2069,151 @@ END SUBROUTINE CheckR8Var
    CHARACTER(*), INTENT(IN)       :: Line                                         !< The string to search.
    CHARACTER(*), INTENT(OUT)      :: Words(NumWords)                              !< The array of found words.
    INTEGER, OPTIONAL, INTENT(OUT) :: NumFound                                     !< The number of words found
+   LOGICAL, OPTIONAL, INTENT(IN)  :: IgnoreQuotes                                 !< Flag to ignore quotes (process as whitespace)
 
-      ! Local declarations.
+   INTEGER                        :: iWord                                        ! Word index.
+   INTEGER                        :: i                                            ! Character index in line.
+   INTEGER                        :: iChar                                        ! Character index in word.
+   LOGICAL                        :: InQuotes                                     ! Flag indicating text is within quotes
+   LOGICAL                        :: IgnoreQuotesLoc                              ! Local flag to ignore quotes
 
-   INTEGER                        :: Ch                                           ! Character position within the string.
-   INTEGER                        :: IW                                           ! Word index.
-   INTEGER                        :: NextWhite                                    ! The location of the next whitespace in the string.
+   ! Initialize number of words found to zero if present
+   if (present(NumFound)) NumFound = 0
 
+   ! If no text on line, return
+   if (len_trim(Line) == 0) return
 
+   ! If ignore quotes is present, set local flag, otherwise true
+   if (present(IgnoreQuotes)) then
+      IgnoreQuotesLoc = IgnoreQuotes
+   else
+      IgnoreQuotesLoc = .true. 
+   end if
 
-      ! Let's prefill the array with blanks.
+   ! Let's prefill the array with blanks
+   do iWord = 1, NumWords
+      Words(iWord) = ' '
+   end do
 
-   DO IW=1,NumWords
-      Words(IW) = ' '
-   END DO ! IW
-
-   IW = 0
-
+   ! Initialize word index to first word
+   iWord = 1
    
-      ! Let's make sure we have text on this line.
+   ! Initialize index within word
+   iChar = 0
 
-   IF ( LEN_TRIM( Line ) > 0 )  THEN
+   ! Initialize in quotes to false
+   InQuotes = .false.
 
-         ! Parse words separated by any combination of spaces, tabs, commas,
-         ! semicolons, single quotes, and double quotes ("whitespace").
+   ! Loop through characters in line
+   do i = 1, len_trim(line)
 
-      Ch = 0
+      ! Select based on character
+      select case (Line(i:i))
+      case ('"', "'")               ! Double quotes, single quotes
+         if (IgnoreQuotesLoc .or. InQuotes) then
+            InQuotes = .false.
+            if (iChar > 0) then
+               ! If requested number of words found, exit; otherwise, new word
+               if (iWord == NumWords) exit
+               iWord = iWord + 1
+               iChar = 0
+            end if
+         else
+            InQuotes = .true.
+         end if
+         cycle
 
-      DO
+      ! Word separator
+      case (',', ';', ' ', Tab)   ! Comma, semicolon, space, tab
+         ! If in quotes, keep these in word
+         if (.not. InQuotes) then
+            if (iChar > 0) then
+               ! If requested number of words found, exit; otherwise, new word
+               if (iWord == NumWords) exit
+               iWord = iWord + 1
+               iChar = 0
+            end if
+            cycle
+         end if
 
-         NextWhite = SCAN( Line(Ch+1:) , ' ,;''"'//Tab )
+      end select
 
-         IF ( NextWhite > 1 )  THEN
+      ! Increment character index
+      iChar = iChar + 1
 
-            IW        = IW + 1
-            Words(IW) = Line(Ch+1:Ch+NextWhite-1)
-            if (NextWhite > len(words(iw)) ) then 
-               call ProgWarn('Error reading field from file. There are too many characters in the input file to store in the field. Value may be truncated.') 
-            end if 
+      ! If index is larger than length of word, continue
+      if (iChar > len(words(iWord))) then 
+         call ProgWarn('Error reading field from file. There are too many characters in the input file to store in the field. Value may be truncated. '//Line)
+         cycle
+      end if
 
-            IF ( IW == NumWords )  EXIT
+      ! Add character to word
+      Words(iWord)(iChar:iChar) = Line(i:i)
 
-            Ch = Ch + NextWhite
+   end do
+   
+   if (present(NumFound)) NumFound = iWord
 
-         ELSE IF ( NextWhite == 1 )  THEN
-
-            Ch = Ch + 1
-
-            CYCLE
-
-         ELSE
-
+   END SUBROUTINE GetWords
+!=======================================================================
+!> This subroutine is used to compare a header line (`HeaderLine`) with a list of column names.
+!! It searches for each possible column name (AvailableChanName) and returns an index array indicating which
+!! order the columns are listed in the file (this allows columns to be entered in different orders or for 
+!! some columns to be missing. It returns an error if any of the required channels are missing.
+   SUBROUTINE GetInputColumnIndex(MaxCols, AvailableChanNames, RequiredChanNames, HeaderLine, Indx, ErrStat, ErrMsg)
+   
+      INTEGER(IntKi), INTENT(IN   )    :: MaxCols                             !< maximum number of columns that should be in the input file
+      CHARACTER(*),   INTENT(IN   )    :: AvailableChanNames(MaxCols)         !< list of column headers, THESE SHOULD BE IN UPPER CASE
+      LOGICAL,        INTENT(IN   )    :: RequiredChanNames( MaxCols)         !< T/F corresponding to channel names to determine if these channels should be required
+      CHARACTER(*),   INTENT(IN   )    :: HeaderLine                          !< line of text to be read
+      INTEGER(IntKi), INTENT(INOUT)    :: Indx(MaxCols)                       !< index relating upper-case column names found in header line with AvailableChanNames
+      INTEGER(IntKi), INTENT(  OUT)    :: ErrStat                             !< returns a fatal error if a required channel name isn't found in HeaderLine
+      CHARACTER(*),   INTENT(  OUT)    :: ErrMsg                              !< returns message about which column is missing
+   
+      CHARACTER(ChanLen)               :: Words(MaxCols)
+      INTEGER(IntKi)                   :: i                    ! loop counter
+      INTEGER(IntKi)                   :: j                    ! loop counter
+      INTEGER(IntKi)                   :: FirstCheck
+      INTEGER(IntKi)                   :: NumFound
+            
+      ErrStat = ErrID_None
+      ErrMsg  = ""
+      
+      CALL GetWords ( HeaderLine, Words, MaxCols, NumFound )
+      
+      DO j = 1,NumFound
+         CALL Conv2UC ( Words(j) )
+      
+         ! stop reading any more headers if this word starts with a comment character (indicating that the columns aren't in the table)
+         IF ( INDEX( CommChars, Words(j)(1:1) ) > 0 ) THEN
+            NumFound = j - 1
             EXIT
-
          END IF
-
       END DO
       
-   END IF
-   
-   IF (PRESENT(NumFound)) NumFound = IW
-
-   RETURN
-   END SUBROUTINE GetWords
+      Indx = -1 ! initialize all values to be "not found"
+      
+      FirstCheck = 1
+      DO i = 1,SIZE(Indx)
+         DO j = FirstCheck,NumFound
+            IF ( TRIM(AvailableChanNames(i)) == TRIM(Words(j)) ) THEN
+               Indx(I) = j
+               IF (j == FirstCheck + 1) FirstCheck = FirstCheck + 1 ! attempt to make this loop a little faster without assuming anything about the order of the words found
+               CYCLE
+            END IF
+         END DO
+      END DO
+      
+      ! check that the required columns are in the file:
+      DO i = 1,SIZE(Indx)
+         IF (Indx(i) < 1 .and. RequiredChanNames(i)) THEN
+            ErrStat = ErrID_Fatal
+            ErrMsg = TRIM(AvailableChanNames(i))//" , a required input, was not found in the line."
+            RETURN
+         END IF
+      END DO
+      
+   END SUBROUTINE GetInputColumnIndex
 !=======================================================================
 !> This routine converts an ASCII array of integers into an equivalent string
 !! (character array). This routine is the inverse of the Str2IntAry() (nwtc_io::str2intary) routine.
@@ -2409,6 +2490,7 @@ END SUBROUTINE CheckR8Var
 
       ! Get a unit number for the echo file:
 
+   !$OMP critical(fileopenNWTCio_critical)
    IF ( Un < 0 ) THEN
       CALL GetNewUnit( Un, ErrStat2, ErrMsg2 )
          CALL SetErrStat(ErrStat2, ErrMsg2,ErrStat, ErrMsg, RoutineName )
@@ -2419,6 +2501,7 @@ END SUBROUTINE CheckR8Var
 
    CALL OpenFOutFile( Un, OutFile, ErrStat2, ErrMsg2 )
       CALL SetErrStat(ErrStat2, ErrMsg2,ErrStat, ErrMsg, RoutineName )
+   !$OMP end critical(fileopenNWTCio_critical)
       IF ( ErrStat >= AbortErrLev ) RETURN
 
 
@@ -2900,7 +2983,7 @@ END SUBROUTINE CheckR8Var
 !!
 !! WARNING: This routine assumes the "words" containing the variable name and value are <= 20 characters. \n
 !! Use ParseVar (nwtc_io::parsevar) instead of directly calling a specific routine in the generic interface.   
-   SUBROUTINE ParseChVar ( FileInfo, LineNum, ExpVarName, Var, ErrStat, ErrMsg, UnEc )
+   SUBROUTINE ParseChVar ( FileInfo, LineNum, ExpVarName, Var, ErrStat, ErrMsg, UnEc, IsPath )
 
          ! Arguments declarations.
 
@@ -2909,6 +2992,7 @@ END SUBROUTINE CheckR8Var
       INTEGER(IntKi), INTENT(INOUT)          :: LineNum                       !< The number of the line to parse.
 
       INTEGER,        INTENT(IN), OPTIONAL   :: UnEc                          !< I/O unit for echo file. If present and > 0, write to UnEc.
+      LOGICAL,        INTENT(IN), OPTIONAL   :: IsPath                        !< Flag indicating that string is a path.
 
       CHARACTER(*),   INTENT(OUT)            :: Var                           !< The variable to receive the input value.
       CHARACTER(*),   INTENT(OUT)            :: ErrMsg                        !< The error message, if ErrStat /= 0.
@@ -2921,6 +3005,7 @@ END SUBROUTINE CheckR8Var
 
       INTEGER(IntKi)                         :: ErrStatLcl                    ! Error status local to this routine.
       INTEGER(IntKi)                         :: NameIndx                      ! The index into the Words array that points to the variable name.
+      LOGICAL                                :: IgnoreQuotes
 
       CHARACTER(NWTC_SizeOfNumWord)          :: Words       (2)               ! The two "words" parsed from the line.
       CHARACTER(ErrMsgLen)                   :: ErrMsg2
@@ -2940,8 +3025,12 @@ END SUBROUTINE CheckR8Var
          RETURN
       END IF
       
-      
-      CALL GetWords ( FileInfo%Lines(LineNum), Words, 2 )                     ! Read the first two words in Line.
+      if (present(IsPath)) then
+         IgnoreQuotes = .not. IsPath
+      else
+         IgnoreQuotes = .true.
+      end if
+      CALL GetWords ( FileInfo%Lines(LineNum), Words, 2, IgnoreQuotes=IgnoreQuotes )                     ! Read the first two words in Line.
       IF ( Words(2) == '' .and. (LEN_TRIM(ExpVarName) > 0) )  THEN
          CALL SetErrStat ( ErrID_Fatal, 'A fatal error occurred when parsing data from "' &
                    //TRIM( FileInfo%FileList(FileInfo%FileIndx(LineNum)) )//'".'//NewLine//  &
@@ -3853,7 +3942,7 @@ END SUBROUTINE CheckR8Var
       CALL Conv2UC( defaultStr )
       IF ( INDEX(defaultStr, "DEFAULT" ) /= 1 ) THEN ! If it's not "default", read this variable
          LineNum = LineNum - 1  ! back up a line
-         CALL ParseVar ( FileInfo, LineNum, ExpVarName, Var, ErrStatLcl, ErrMsg2, UnEc )
+         CALL ParseVar ( FileInfo, LineNum, ExpVarName, Var, ErrStatLcl, ErrMsg2 )
             CALL SetErrStat( ErrStatLcl, ErrMsg2, ErrStat, ErrMsg, RoutineName )
       ELSE
          Var = VarDefault  ! "DEFAULT" value
@@ -4567,20 +4656,26 @@ END SUBROUTINE CheckR8Var
       ! Local declarations:
 
    INTEGER                      :: IOS                                             ! I/O status returned from the read statement.
+   CHARACTER(ErrMsgLen)         :: CommentInt                                      ! internal comment, if not returned from this subroutine
 
 
-
-
-   READ (UnIn,'(A)',IOSTAT=IOS)  Comment
+   IF (PRESENT(Comment)) THEN
+      READ (UnIn,'(A)',IOSTAT=IOS)  Comment
+   ELSE
+      READ (UnIn,'(A)',IOSTAT=IOS)  CommentInt
+   END IF
 
    CALL CheckIOS ( IOS, Fil, ComName, StrType, ErrStat, ErrMsg )
-
-
    IF (ErrStat >= AbortErrLev) RETURN
 
    IF ( PRESENT(UnEc) )  THEN
-      IF ( UnEc > 0 ) &
-         WRITE (UnEc,'(A)')  TRIM(Comment)
+      IF ( UnEc > 0 ) THEN
+         IF (PRESENT(Comment)) THEN
+            WRITE (UnEc,'(A)')  TRIM(Comment)
+         ELSE
+            WRITE (UnEc,'(A)')  TRIM(CommentInt)
+         END IF
+      END IF
    END IF
 
 
@@ -4633,11 +4728,13 @@ END SUBROUTINE CheckR8Var
       RETURN
    END IF
    
+   !$OMP critical(fileopenNWTCio_critical)
    CALL GetNewUnit ( UnIn, ErrStatLcl, ErrMsg2 )
       CALL SetErrStat( ErrStatLcl, ErrMsg2, ErrStat, ErrMsg, RoutineName )
 
    CALL OpenFInpFile ( UnIn, FileInfo%FileList(FileIndx), ErrStatLcl, ErrMsg2 )
       CALL SetErrStat( ErrStatLcl, ErrMsg2, ErrStat, ErrMsg, RoutineName )
+   !$OMP end critical(fileopenNWTCio_critical)
       IF ( ErrStat >= AbortErrLev )  RETURN
 
 
@@ -6567,9 +6664,11 @@ end subroutine ReadR8AryWDefault
 
          ! Open the input file.
       UnIn = -1
+      !$OMP critical(fileopenNWTCio_critical)
       CALL GetNewUnit ( UnIn, ErrStatLcl, ErrMsg2 )
 
       CALL OpenFInpFile ( UnIn, Filename, ErrStatLcl, ErrMsg2 )
+      !$OMP end critical(fileopenNWTCio_critical)
       IF ( ErrStatLcl /= 0 )  THEN
          CALL SetErrStat( ErrStatLcl, ErrMsg2, ErrStat, ErrMsg, RoutineName )
          CALL Cleanup()
@@ -6877,6 +6976,7 @@ end subroutine ReadR8AryWDefault
 
       ! Generate the unit number for the binary file
    UnIn = 0
+   !$OMP critical(fileopenNWTCio_critical)
    CALL GetNewUnit( UnIn, ErrStat2, ErrMsg2 )
       CALL SetErrStat( ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName )
 
@@ -6886,6 +6986,7 @@ end subroutine ReadR8AryWDefault
 
    CALL OpenBOutFile ( UnIn, TRIM(FileName), ErrStat2, ErrMsg2 )
       CALL SetErrStat( ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName )
+   !$OMP end critical(fileopenNWTCio_critical)
       IF ( ErrStat >= AbortErrLev ) THEN
          CALL Cleanup()
          RETURN

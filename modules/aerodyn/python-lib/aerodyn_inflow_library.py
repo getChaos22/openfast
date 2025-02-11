@@ -2,7 +2,7 @@
 # LICENSING
 # Copyright (C) 2021 National Renewable Energy Laboratory
 #
-# This file is part of InflowWind.
+# This file is part of AeroDyn.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -70,8 +70,8 @@ class AeroDynInflowLib(CDLL):
         self.ended = False                  # For error handling at end
 
         # Input file handling
-        self.ADinputPass  = True            # Assume passing of input file as a string
-        self.IfWinputPass = True            # Assume passing of input file as a string
+        self.ADinputPass  = 1               # Assume passing of input file as a string
+        self.IfWinputPass = 1               # Assume passing of input file as a string
 
         # Create buffers for class data
         self.abort_error_level = 4
@@ -101,11 +101,13 @@ class AeroDynInflowLib(CDLL):
         # flags
         self.storeHHVel  = 1          # 0=false, 1=true
         self.transposeDCM= 1          # 0=false, 1=true
+        self.pointLoadOut= 1          # 0=false, 1=true
         self.debuglevel  = 0          # 0-4 levels
 
         # VTK
         self.WrVTK       = 0          # default of no vtk output
         self.WrVTK_Type  = 1          # default of surface meshes
+        self.WrVTK_DT    = 0.0        # default to all
         self.VTKNacDim   = np.array([-2.5,-2.5,0,10,5,5], dtype="float32")        # default nacelle dimension for VTK surface rendering [x0,y0,z0,Lx,Ly,Lz] (m)
         self.VTKHubRad   = 1.5        # default hub radius for VTK surface rendering
 
@@ -155,6 +157,7 @@ class AeroDynInflowLib(CDLL):
         #   If HD writes a file (echo, summary, or other), use this for the
         #   root of the file name.
         self.outRootName = "Output_ADIlib_default"
+        self.outVTKdir   = ""       # Set to specify a directory relative to the input files (created if doesn't exist)
 
     # _initialize_routines() ------------------------------------------------------------------------------------------------------------
     def _initialize_routines(self):
@@ -162,6 +165,7 @@ class AeroDynInflowLib(CDLL):
         self.ADI_C_PreInit.argtypes = [
             POINTER(c_int),                     # numTurbines
             POINTER(c_int),                     # transposeDCM
+            POINTER(c_int),                     # pointLoadOutput
             POINTER(c_int),                     # debuglevel
             POINTER(c_int),                     # ErrStat_C
             POINTER(c_char)                     # ErrMsg_C
@@ -197,6 +201,7 @@ class AeroDynInflowLib(CDLL):
             POINTER(c_char_p),                  # IfW input file as string
             POINTER(c_int),                     # IfW input file string length
             POINTER(c_char),                    # OutRootName
+            POINTER(c_char),                    # OutVTKdir
             POINTER(c_float),                   # gravity
             POINTER(c_float),                   # defFldDens
             POINTER(c_float),                   # defKinVisc
@@ -211,6 +216,7 @@ class AeroDynInflowLib(CDLL):
             POINTER(c_int),                     # storeHHVel
             POINTER(c_int),                     # WrVTK
             POINTER(c_int),                     # WrVTK_Type
+            POINTER(c_double),                  # WrVTK_DT  -- 0 or negative to do every step
             POINTER(c_float),                   # VTKNacDim
             POINTER(c_float),                   # VTKHubRad
             POINTER(c_int),                     # wrOuts -- file format for writing outputs
@@ -258,10 +264,20 @@ class AeroDynInflowLib(CDLL):
             POINTER(c_int),                     # iturb
             POINTER(c_int),                     # numMeshPts
             POINTER(c_float),                   # meshFrc -- mesh forces/moments in flat array of 6*numMeshPts
+            POINTER(c_float),                   # hhVel -- wind speed at hub height in flat array of 3
             POINTER(c_int),                     # ErrStat_C
             POINTER(c_char)                     # ErrMsg_C
         ]
         self.ADI_C_GetRotorLoads.restype = c_int
+
+
+        self.ADI_C_GetDiskAvgVel.argtypes = [
+            POINTER(c_int),                     # iturb
+            POINTER(c_float),                   # Disk average vel vector
+            POINTER(c_int),                     # ErrStat_C
+            POINTER(c_char)                     # ErrMsg_C
+        ]
+        self.ADI_C_GetDiskAvgVel.restype = c_int
 
 
         self.ADI_C_CalcOutput.argtypes = [
@@ -295,6 +311,7 @@ class AeroDynInflowLib(CDLL):
         self.ADI_C_PreInit(
             byref(c_int(self.numTurbines)),         # IN: numTurbines
             byref(c_int(self.transposeDCM)),        # IN: transposeDCM
+            byref(c_int(self.pointLoadOut)),        # IN: pointLoadOut
             byref(c_int(self.debuglevel)),          # IN: debuglevel
             byref(self.error_status_c),             # OUT: ErrStat_C
             self.error_message_c                    # OUT: ErrMsg_C
@@ -366,6 +383,7 @@ class AeroDynInflowLib(CDLL):
 
         # Rootname for ADI output files (echo etc).
         _outRootName_c = create_string_buffer((self.outRootName.ljust(self.default_str_c_len)).encode('utf-8'))
+        _outVTKdir_c   = create_string_buffer((self.outVTKdir.ljust(self.default_str_c_len)).encode('utf-8'))
 
         #   Flatten arrays to pass
         #       [x2,y1,z1, x2,y2,z2 ...]
@@ -380,6 +398,7 @@ class AeroDynInflowLib(CDLL):
             c_char_p(IfW_input_string),             # IN: IfW input file as string (or filename if IfWinputPass is false)
             byref(c_int(IfW_input_string_length)),  # IN: IfW input file string length
             _outRootName_c,                         # IN: rootname for ADI file writing
+            _outVTKdir_c,                           # IN: directory for vtk output files (relative to input file)
             byref(c_float(self.gravity)),           # IN: gravity
             byref(c_float(self.defFldDens)),        # IN: defFldDens
             byref(c_float(self.defKinVisc)),        # IN: defKinVisc
@@ -394,6 +413,7 @@ class AeroDynInflowLib(CDLL):
             byref(c_int(self.storeHHVel)),          # IN: storeHHVel
             byref(c_int(self.WrVTK)),               # IN: WrVTK
             byref(c_int(self.WrVTK_Type)),          # IN: WrVTK_Type
+            byref(c_double(self.WrVTK_DT)),         # IN: WrVTK_DT
             VTKNacDim_c,                            # IN: VTKNacDim
             byref(c_float(self.VTKHubRad)),         # IN: VTKHubRad
             byref(c_int(self.wrOuts)),              # IN: wrOuts -- file format for writing outputs
@@ -486,16 +506,18 @@ class AeroDynInflowLib(CDLL):
         self.check_error()
 
 
-    # adi_calcOutput ------------------------------------------------------------------------------------------------------------
-    def adi_getrotorloads(self, iturb, meshFrcMom):
+    # adi_getrotorloads ---------------------------------------------------------------------------------------------------------
+    def adi_getrotorloads(self, iturb, meshFrcMom, hhVel=None):
         # Resulting Forces/moments --  [Fx1,Fy1,Fz1,Mx1,My1,Mz1, Fx2,Fy2,Fz2,Mx2,My2,Mz2 ...]
         _meshFrc_flat_c = (c_float * (6 * self.numMeshPts))(0.0,)
+        _hhVel_flat_c = (c_float * 3)(0.0,)
 
         # Run ADI_C_GetRotorLoads
         self.ADI_C_GetRotorLoads(
             c_int(iturb),                           # IN: iturb -- current turbine number
             byref(c_int(self.numMeshPts)),          # IN: number of attachment points expected (where motions are transferred into HD)
             _meshFrc_flat_c,                        # OUT: resulting forces/moments array
+            _hhVel_flat_c,                          # OUT: hub height velocity [Vx, Vy, Vz]
             byref(self.error_status_c),             # OUT: ErrStat_C
             self.error_message_c                    # OUT: ErrMsg_C
         )
@@ -512,6 +534,33 @@ class AeroDynInflowLib(CDLL):
             meshFrcMom[j,4] = _meshFrc_flat_c[count+4]
             meshFrcMom[j,5] = _meshFrc_flat_c[count+5]
             count = count + 6
+
+        ## Hub height wind speed
+        if self.storeHHVel and hhVel != None:
+            hhVel[0] = _hhVel_flat_c[0]
+            hhVel[1] = _hhVel_flat_c[1]
+            hhVel[2] = _hhVel_flat_c[2]
+
+
+    # adi_getdiskavgvel ---------------------------------------------------------------------------------------------------------
+    def adi_getdiskavgvel(self, iturb, diskAvgVel):
+        # Resulting disk average velocity [Vx,Vy,Vz]
+        _diskAvgVel_flat_c = (c_float * 3)(0.0,)
+
+        # Run ADI_GetDiskAvgVel
+        self.ADI_C_GetDiskAvgVel(
+            c_int(iturb),                           # IN: iturb -- current turbine number
+            _diskAvgVel_flat_c,                     # OUT: disk average velocity [Vx, Vy, Vz]
+            byref(self.error_status_c),             # OUT: ErrStat_C
+            self.error_message_c                    # OUT: ErrMsg_C
+        )
+
+        self.check_error()
+
+        ## Disk average wind speed
+        diskAvgVel[0] = _diskAvgVel_flat_c[0]
+        diskAvgVel[1] = _diskAvgVel_flat_c[1]
+        diskAvgVel[2] = _diskAvgVel_flat_c[2]
 
 
     # adi_calcOutput ------------------------------------------------------------------------------------------------------------
@@ -896,6 +945,9 @@ class DriverDbg():
             self.DbgFile.write(f_string.format(f_num+"Mx" ))
             self.DbgFile.write(f_string.format(f_num+"My" ))
             self.DbgFile.write(f_string.format(f_num+"Mz" ))
+        self.DbgFile.write(f_string.format(f_num+"DskAvgVx" ))
+        self.DbgFile.write(f_string.format(f_num+"DskAvgVy" ))
+        self.DbgFile.write(f_string.format(f_num+"DskAvgVz" ))
         self.DbgFile.write("\n")
         self.DbgFile.write("       (s)     ")
         for i in range(1,self.numMeshPts+1):
@@ -923,10 +975,13 @@ class DriverDbg():
             self.DbgFile.write(f_string.format("(N-m)"    ))
             self.DbgFile.write(f_string.format("(N-m)"    ))
             self.DbgFile.write(f_string.format("(N-m)"    ))
+        self.DbgFile.write(f_string.format("(m/s)"    ))
+        self.DbgFile.write(f_string.format("(m/s)"    ))
+        self.DbgFile.write(f_string.format("(m/s)"    ))
         self.DbgFile.write("\n")
         self.opened = True
 
-    def write(self,t,meshPos,meshVel,meshAcc,meshFrc):
+    def write(self,t,meshPos,meshVel,meshAcc,meshFrc,DiskAvgVel):
         t_string  = "{:10.4f}"
         f_string3 = "{:25.7e}"*3
         f_string6 = "{:25.7e}"*6
@@ -936,6 +991,7 @@ class DriverDbg():
             self.DbgFile.write(f_string6.format(*meshVel[i,:]))
             self.DbgFile.write(f_string6.format(*meshAcc[i,:]))
             self.DbgFile.write(f_string6.format(*meshFrc[i,:]))
+        self.DbgFile.write(f_string3.format(*DiskAvgVel[:]))
         self.DbgFile.write("\n")
 
     def end(self):

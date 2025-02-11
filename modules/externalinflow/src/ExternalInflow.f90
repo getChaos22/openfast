@@ -302,9 +302,9 @@ SUBROUTINE ExtInfw_UpdateFlowField(p_FAST, ExtInfw, ErrStat, ErrMsg)
    ErrStat = ErrID_None
    ErrMsg  = ""
 
-   ExtInfw%m%FlowField%Points%Vel(1:size(ExtInfw%y%u),1) = ExtInfw%y%u
-   ExtInfw%m%FlowField%Points%Vel(1:size(ExtInfw%y%v),2) = ExtInfw%y%v
-   ExtInfw%m%FlowField%Points%Vel(1:size(ExtInfw%y%w),3) = ExtInfw%y%w
+   ExtInfw%m%FlowField%Points%Vel(1,1:size(ExtInfw%y%u)) = ExtInfw%y%u
+   ExtInfw%m%FlowField%Points%Vel(2,1:size(ExtInfw%y%v)) = ExtInfw%y%v
+   ExtInfw%m%FlowField%Points%Vel(3,1:size(ExtInfw%y%w)) = ExtInfw%y%w
 END SUBROUTINE ExtInfw_UpdateFlowField
 
 !----------------------------------------------------------------------------------------------------------------------------------
@@ -423,7 +423,7 @@ SUBROUTINE SetExtInfwPositions(p_FAST, u_AD, ExtInfw, ErrStat, ErrMsg)
          ExtInfw%u%xdotForce(Node) = real(ExtInfw%m%ActForceMotionsPoints(k)%TranslationVel(1,J),c_float)
          ExtInfw%u%ydotForce(Node) = real(ExtInfw%m%ActForceMotionsPoints(k)%TranslationVel(2,J),c_float)
          ExtInfw%u%zdotForce(Node) = real(ExtInfw%m%ActForceMotionsPoints(k)%TranslationVel(3,J),c_float)
-         ExtInfw%u%pOrientation((Node-1)*9_1:Node*9) = real(pack(ExtInfw%m%ActForceMotionsPoints(k)%Orientation(:,:,J),.true.),c_float)
+         ExtInfw%u%pOrientation((Node-1)*9+1:Node*9) = real(pack(ExtInfw%m%ActForceMotionsPoints(k)%Orientation(:,:,J),.true.),c_float)
       END DO
 
    END DO

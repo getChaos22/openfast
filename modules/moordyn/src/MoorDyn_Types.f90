@@ -68,6 +68,8 @@ IMPLICIT NONE
     REAL(DbKi)  :: w = 0.0_R8Ki      !< per-length weight in air [[kg/m]]
     REAL(DbKi)  :: EA = 0.0_R8Ki      !< axial stiffness [[N]]
     REAL(DbKi)  :: EA_D = 0.0_R8Ki      !< axial stiffness [[N]]
+    REAL(DbKi)  :: alphaMBL = 0.0_R8Ki      !< dynamic stiffness constant: Krd alpha term x MBL [[N]]
+    REAL(DbKi)  :: vbeta = 0.0_R8Ki      !< dynamic stiffness Lm slope: Krd beta term (to be multiplied by mean load) [[N]]
     REAL(DbKi)  :: BA = 0.0_R8Ki      !< internal damping coefficient times area [[N-s]]
     REAL(DbKi)  :: BA_D = 0.0_R8Ki      !< internal damping coefficient times area [[N-s]]
     REAL(DbKi)  :: EI = 0.0_R8Ki      !< bending stiffness [[N-m]]
@@ -75,14 +77,14 @@ IMPLICIT NONE
     REAL(DbKi)  :: Cat = 0.0_R8Ki      !< tangential added mass coefficient [-]
     REAL(DbKi)  :: Cdn = 0.0_R8Ki      !< transverse drag coefficient [-]
     REAL(DbKi)  :: Cdt = 0.0_R8Ki      !< tangential drag coefficient [-]
-    INTEGER(IntKi)  :: ElasticMod = 0_IntKi      !< Which elasticity model to use: {0 basic, 1 viscoelastic, 2 future SYCOM}  [-]
-    INTEGER(IntKi)  :: nEApoints = 0      !< number of values in stress-strain lookup table (0 means using constant E) [-]
+    INTEGER(IntKi)  :: ElasticMod = 0_IntKi      !< Which elasticity model to use: {1 basic, 2 viscoelastic, 3 viscoelastic+meanload}  [-]
+    INTEGER(IntKi)  :: nEApoints = 0_IntKi      !< number of values in stress-strain lookup table (0 means using constant E) [-]
     REAL(DbKi) , DIMENSION(1:30)  :: stiffXs = 0.0_R8Ki      !< x array for stress-strain lookup table (up to nCoef) [-]
     REAL(DbKi) , DIMENSION(1:30)  :: stiffYs = 0.0_R8Ki      !< y array for stress-strain lookup table [-]
-    INTEGER(IntKi)  :: nBApoints = 0      !< number of values in stress-strainrate lookup table (0 means using constant c) [-]
+    INTEGER(IntKi)  :: nBApoints = 0_IntKi      !< number of values in stress-strainrate lookup table (0 means using constant c) [-]
     REAL(DbKi) , DIMENSION(1:30)  :: dampXs = 0.0_R8Ki      !< x array for stress-strainrate lookup table (up to nCoef) [-]
     REAL(DbKi) , DIMENSION(1:30)  :: dampYs = 0.0_R8Ki      !< y array for stress-strainrate lookup table [-]
-    INTEGER(IntKi)  :: nEIpoints = 0      !< number of values in bending stress-strain lookup table (0 means using constant E) [-]
+    INTEGER(IntKi)  :: nEIpoints = 0_IntKi      !< number of values in bending stress-strain lookup table (0 means using constant E) [-]
     REAL(DbKi) , DIMENSION(1:30)  :: bstiffXs = 0.0_R8Ki      !< x array for stress-strain lookup table (up to nCoef) [-]
     REAL(DbKi) , DIMENSION(1:30)  :: bstiffYs = 0.0_R8Ki      !< y array for stress-strain lookup table [-]
   END TYPE MD_LineProp
@@ -99,8 +101,6 @@ IMPLICIT NONE
     REAL(DbKi)  :: Cdt = 0.0_R8Ki      !< tangential drag coefficient [-]
     REAL(DbKi)  :: CdEnd = 0.0_R8Ki      !< drag coefficient for rod end [[-]]
     REAL(DbKi)  :: CaEnd = 0.0_R8Ki      !< added mass coefficient for rod end [[-]]
-    REAL(DbKi)  :: LinDamp = 0.0_R8Ki      !< Linear damping, transverse damping for body element [[N/(m/s)/m]]
-    LOGICAL  :: isLinDamp = .false.      !< Linear damping, transverse damping for body element is used [-]
   END TYPE MD_RodProp
 ! =======================
 ! =========  MD_Body  =======
@@ -109,8 +109,8 @@ IMPLICIT NONE
     INTEGER(IntKi)  :: typeNum = 0_IntKi      !< integer identifying the type.  0=free, 1=fixed, -1=coupled, 2=coupledpinned [-]
     INTEGER(IntKi) , DIMENSION(1:30)  :: AttachedC = 0_IntKi      !< list of IdNums of points attached to this body [-]
     INTEGER(IntKi) , DIMENSION(1:30)  :: AttachedR = 0_IntKi      !< list of IdNums of rods attached to this body [-]
-    INTEGER(IntKi)  :: nAttachedC = 0      !< number of attached points [-]
-    INTEGER(IntKi)  :: nAttachedR = 0      !< number of attached rods [-]
+    INTEGER(IntKi)  :: nAttachedC = 0_IntKi      !< number of attached points [-]
+    INTEGER(IntKi)  :: nAttachedR = 0_IntKi      !< number of attached rods [-]
     REAL(DbKi) , DIMENSION(1:3,1:30)  :: rPointRel = 0.0_R8Ki      !< relative position of point on body [-]
     REAL(DbKi) , DIMENSION(1:6,1:30)  :: r6RodRel = 0.0_R8Ki      !< relative position and orientation of rod on body [-]
     REAL(DbKi)  :: bodyM = 0.0_R8Ki      !< body mass (seperate from attached objects) [[kg]]
@@ -131,6 +131,12 @@ IMPLICIT NONE
     REAL(DbKi) , DIMENSION(1:6,1:6)  :: M0 = 0.0_R8Ki      !< body 6-dof mass and inertia matrix in its own frame [-]
     REAL(DbKi) , DIMENSION(1:3,1:3)  :: OrMat = 0.0_R8Ki      !< DCM for body orientation [-]
     REAL(DbKi) , DIMENSION(1:3)  :: rCG = 0.0_R8Ki      !< vector in body frame from ref point to CG (before rods etc..) [-]
+    REAL(DbKi) , DIMENSION(1:3)  :: FextG = 0.0_R8Ki      !< vector of user-defined external force on the body in the global frame [[N]]
+    REAL(DbKi) , DIMENSION(1:3)  :: BlinG = 0.0_R8Ki      !< user-defined linear translational damping on the body in the global frame [[N/(m/s)]]
+    REAL(DbKi) , DIMENSION(1:3)  :: BquadG = 0.0_R8Ki      !< user-defined quadratic translational damping on the body in the global frame [[N/(m/s)^2]]
+    REAL(DbKi) , DIMENSION(1:3)  :: FextL = 0.0_R8Ki      !< vector of user-defined external force on the body in the local body-fixed frame [[N]]
+    REAL(DbKi) , DIMENSION(1:3)  :: BlinL = 0.0_R8Ki      !< user-defined linear translational damping on the body in the local body-fixed frame [[N/(m/s)]]
+    REAL(DbKi) , DIMENSION(1:3)  :: BquadL = 0.0_R8Ki      !< user-defined quadratic translational damping on the body in the local body-fixed frame [[N/(m/s)^2]]
   END TYPE MD_Body
 ! =======================
 ! =========  MD_Point  =======
@@ -140,7 +146,7 @@ IMPLICIT NONE
     INTEGER(IntKi)  :: typeNum = 0_IntKi      !< integer identifying the type.  1=fixed, -1=coupled, 0=free [-]
     INTEGER(IntKi) , DIMENSION(1:10)  :: Attached = 0_IntKi      !< list of IdNums of lines attached to this point node [-]
     INTEGER(IntKi) , DIMENSION(1:10)  :: Top = 0_IntKi      !< list of ints specifying whether each line is attached at 1 = top/fairlead(end B), 0 = bottom/anchor(end A) [-]
-    INTEGER(IntKi)  :: nAttached = 0      !< number of attached lines [-]
+    INTEGER(IntKi)  :: nAttached = 0_IntKi      !< number of attached lines [-]
     REAL(DbKi)  :: pointM = 0.0_R8Ki      !< point mass [[kg]]
     REAL(DbKi)  :: pointV = 0.0_R8Ki      !< point volume [[m^3]]
     REAL(DbKi)  :: pointFX = 0.0_R8Ki      !<  [-]
@@ -158,6 +164,9 @@ IMPLICIT NONE
     REAL(DbKi) , DIMENSION(:), ALLOCATABLE  :: PDyn      !< water dynamic pressure at node [[Pa]]
     REAL(DbKi) , DIMENSION(1:3)  :: Fnet = 0.0_R8Ki      !< total force on node (excluding inertial loads) [-]
     REAL(DbKi) , DIMENSION(1:3,1:3)  :: M = 0.0_R8Ki      !< node mass matrix, from attached lines [-]
+    REAL(DbKi) , DIMENSION(1:3)  :: Fext = 0.0_R8Ki      !< vector of user-defined external force on the point always in the global frame [[N]]
+    REAL(DbKi) , DIMENSION(1:3)  :: Blin = 0.0_R8Ki      !< user-defined linear translational damping on the point always in the global frame [[N/(m/s)]]
+    REAL(DbKi) , DIMENSION(1:3)  :: Bquad = 0.0_R8Ki      !< user-defined quadratic translational damping on the point always in the global frame [[N/(m/s)^2]]
   END TYPE MD_Point
 ! =======================
 ! =========  MD_Rod  =======
@@ -170,8 +179,8 @@ IMPLICIT NONE
     INTEGER(IntKi) , DIMENSION(1:10)  :: AttachedB = 0_IntKi      !< list of IdNums of lines attached to end B [-]
     INTEGER(IntKi) , DIMENSION(1:10)  :: TopA = 0_IntKi      !< list of ints specifying whether each line is attached at 1 = top/fairlead(end B), 0 = bottom/anchor(end A) [-]
     INTEGER(IntKi) , DIMENSION(1:10)  :: TopB = 0_IntKi      !< list of ints specifying whether each line is attached at 1 = top/fairlead(end B), 0 = bottom/anchor(end A) [-]
-    INTEGER(IntKi)  :: nAttachedA = 0      !< number of attached lines to Rod end A [-]
-    INTEGER(IntKi)  :: nAttachedB = 0      !< number of attached lines to Rod end B [-]
+    INTEGER(IntKi)  :: nAttachedA = 0_IntKi      !< number of attached lines to Rod end A [-]
+    INTEGER(IntKi)  :: nAttachedB = 0_IntKi      !< number of attached lines to Rod end B [-]
     INTEGER(IntKi) , DIMENSION(1:20)  :: OutFlagList = 0_IntKi      !< array specifying what line quantities should be output (1 vs 0) [-]
     INTEGER(IntKi)  :: N = 0_IntKi      !< The number of elements in the line [-]
     INTEGER(IntKi)  :: endTypeA = 0_IntKi      !< type of point at end A: 0=pinned to Point, 1=cantilevered to Rod. [-]
@@ -186,8 +195,6 @@ IMPLICIT NONE
     REAL(DbKi)  :: Cdt = 0.0_R8Ki      !<  [[-]]
     REAL(DbKi)  :: CdEnd = 0.0_R8Ki      !< drag coefficient for rod end [[-]]
     REAL(DbKi)  :: CaEnd = 0.0_R8Ki      !< added mass coefficient for rod end [[-]]
-    REAL(DbKi)  :: LinDamp = 0.0_R8Ki      !< Linear damping, transverse damping for rod element [[N/(m/s)/m]]
-    LOGICAL  :: isLinDamp = .false.      !< Linear damping, transverse damping for rod element is used [-]
     REAL(DbKi)  :: time = 0.0_R8Ki      !< current time [[s]]
     REAL(DbKi)  :: roll = 0.0_R8Ki      !< roll relative to vertical [[rad]]
     REAL(DbKi)  :: pitch = 0.0_R8Ki      !< pitch relative to vertical [[rad]]
@@ -209,6 +216,8 @@ IMPLICIT NONE
     REAL(DbKi) , DIMENSION(:,:), ALLOCATABLE  :: Ap      !< node added mass forcing (transverse) [[N]]
     REAL(DbKi) , DIMENSION(:,:), ALLOCATABLE  :: Aq      !< node added mass forcing (axial) [[N]]
     REAL(DbKi) , DIMENSION(:,:), ALLOCATABLE  :: B      !< node bottom contact force [[N]]
+    REAL(DbKi) , DIMENSION(:,:), ALLOCATABLE  :: Bp      !< transverse damping force [[N]]
+    REAL(DbKi) , DIMENSION(:,:), ALLOCATABLE  :: Bq      !< axial damping force [[N]]
     REAL(DbKi) , DIMENSION(:,:), ALLOCATABLE  :: Fnet      !< total force on node [[N]]
     REAL(DbKi) , DIMENSION(:,:,:), ALLOCATABLE  :: M      !< node mass matrix [[kg]]
     REAL(DbKi) , DIMENSION(1:3)  :: FextA = 0.0_R8Ki      !< external forces from attached lines on/about end A  [-]
@@ -219,9 +228,13 @@ IMPLICIT NONE
     REAL(DbKi) , DIMENSION(1:6)  :: a6 = 0.0_R8Ki      !< 6 DOF acceleration vector (only used for coupled Rods) [-]
     REAL(DbKi) , DIMENSION(1:6)  :: F6net = 0.0_R8Ki      !< total force and moment about end A (excluding inertial loads) that Rod may exert on whatever it's attached to [-]
     REAL(DbKi) , DIMENSION(1:6,1:6)  :: M6net = 0.0_R8Ki      !< total mass matrix about end A of Rod and any attached Points [-]
+    REAL(DbKi) , DIMENSION(1:3,1:3)  :: Imat = 0.0_R8Ki      !< inertia about CG in global frame [-]
     REAL(DbKi) , DIMENSION(1:3,1:3)  :: OrMat = 0.0_R8Ki      !< DCM for body orientation [-]
     INTEGER(IntKi)  :: RodUnOut = 0_IntKi      !< unit number of rod output file [-]
     REAL(DbKi) , DIMENSION(:), ALLOCATABLE  :: RodWrOutput      !< one row of output data for this rod [-]
+    REAL(DbKi) , DIMENSION(1:3)  :: FextU = 0.0_R8Ki      !< vector of user-defined external force on the rod end A always in the local body-fixed frame [[N]]
+    REAL(DbKi) , DIMENSION(1:2)  :: Blin = 0.0_R8Ki      !< linear damping, transverse damping for rod element always in the local body-fixed frame [[N/(m/s)]]
+    REAL(DbKi) , DIMENSION(1:2)  :: Bquad = 0.0_R8Ki      !< quadratic damping, transverse damping for rod element always in the local body-fixed frame [[N/(m/s)^2]]
   END TYPE MD_Rod
 ! =======================
 ! =========  MD_Line  =======
@@ -230,7 +243,7 @@ IMPLICIT NONE
     INTEGER(IntKi)  :: PropsIdNum = 0_IntKi      !< the IdNum of the associated line properties [-]
     INTEGER(IntKi)  :: ElasticMod = 0_IntKi      !< Which elasticity model to use: {0 basic, 1 viscoelastic, 2 future SYCOM}  [-]
     INTEGER(IntKi) , DIMENSION(1:20)  :: OutFlagList = 0_IntKi      !< array specifying what line quantities should be output (1 vs 0) [-]
-    INTEGER(IntKi)  :: CtrlChan = 0      !< index of control channel that will drive line active tensioning (0 for none) [-]
+    INTEGER(IntKi)  :: CtrlChan = 0_IntKi      !< index of control channel that will drive line active tensioning (0 for none) [-]
     INTEGER(IntKi)  :: FairPoint = 0_IntKi      !< IdNum of Point at fairlead [-]
     INTEGER(IntKi)  :: AnchPoint = 0_IntKi      !< IdNum of Point at anchor [-]
     INTEGER(IntKi)  :: N = 0_IntKi      !< The number of elements in the line [-]
@@ -239,22 +252,24 @@ IMPLICIT NONE
     REAL(DbKi)  :: UnstrLen = 0.0_R8Ki      !< unstretched length of the line [-]
     REAL(DbKi)  :: rho = 0.0_R8Ki      !< density [[kg/m3]]
     REAL(DbKi)  :: d = 0.0_R8Ki      !< volume-equivalent diameter [[m]]
-    REAL(DbKi)  :: EA = 0      !< stiffness [[N]]
-    REAL(DbKi)  :: EA_D = 0      !< dynamic stiffness when using viscoelastic model [[N]]
-    REAL(DbKi)  :: BA = 0      !< internal damping coefficient times area for this line only [[N-s]]
-    REAL(DbKi)  :: BA_D = 0      !< dynamic internal damping coefficient times area when using viscoelastic model [[N-s]]
-    REAL(DbKi)  :: EI = 0      !< bending stiffness [[N-m]]
+    REAL(DbKi)  :: EA = 0.0_R8Ki      !< stiffness [[N]]
+    REAL(DbKi)  :: EA_D = 0.0_R8Ki      !< constant dynamic stiffness when using viscoelastic model [[N]]
+    REAL(DbKi)  :: alphaMBL = 0.0_R8Ki      !< load dependent dynamic stiffness constant: Krd alpha term x MBL [[N]]
+    REAL(DbKi)  :: vbeta = 0.0_R8Ki      !< load dependent dynamic stiffness Lm slope: Krd beta term (to be multiplied by mean load) [[N]]
+    REAL(DbKi)  :: BA = 0.0_R8Ki      !< internal damping coefficient times area for this line only [[N-s]]
+    REAL(DbKi)  :: BA_D = 0.0_R8Ki      !< dynamic internal damping coefficient times area when using viscoelastic model [[N-s]]
+    REAL(DbKi)  :: EI = 0.0_R8Ki      !< bending stiffness [[N-m]]
     REAL(DbKi)  :: Can = 0.0_R8Ki      !<  [[-]]
     REAL(DbKi)  :: Cat = 0.0_R8Ki      !<  [[-]]
     REAL(DbKi)  :: Cdn = 0.0_R8Ki      !<  [[-]]
     REAL(DbKi)  :: Cdt = 0.0_R8Ki      !<  [[-]]
-    INTEGER(IntKi)  :: nEApoints = 0      !< number of values in stress-strain lookup table (0 means using constant E) [-]
+    INTEGER(IntKi)  :: nEApoints = 0_IntKi      !< number of values in stress-strain lookup table (0 means using constant E) [-]
     REAL(DbKi) , DIMENSION(1:30)  :: stiffXs = 0.0_R8Ki      !< x array for stress-strain lookup table (up to nCoef) [-]
     REAL(DbKi) , DIMENSION(1:30)  :: stiffYs = 0.0_R8Ki      !< y array for stress-strain lookup table [-]
-    INTEGER(IntKi)  :: nBApoints = 0      !< number of values in stress-strainrate lookup table (0 means using constant c) [-]
+    INTEGER(IntKi)  :: nBApoints = 0_IntKi      !< number of values in stress-strainrate lookup table (0 means using constant c) [-]
     REAL(DbKi) , DIMENSION(1:30)  :: dampXs = 0.0_R8Ki      !< x array for stress-strainrate lookup table (up to nCoef) [-]
     REAL(DbKi) , DIMENSION(1:30)  :: dampYs = 0.0_R8Ki      !< y array for stress-strainrate lookup table [-]
-    INTEGER(IntKi)  :: nEIpoints = 0      !< number of values in bending stress-strain lookup table (0 means using constant E) [-]
+    INTEGER(IntKi)  :: nEIpoints = 0_IntKi      !< number of values in bending stress-strain lookup table (0 means using constant E) [-]
     REAL(DbKi) , DIMENSION(1:30)  :: bstiffXs = 0.0_R8Ki      !< x array for stress-strain lookup table (up to nCoef) [-]
     REAL(DbKi) , DIMENSION(1:30)  :: bstiffYs = 0.0_R8Ki      !< y array for stress-strain lookup table [-]
     REAL(DbKi)  :: time = 0.0_R8Ki      !< current time [[s]]
@@ -269,6 +284,7 @@ IMPLICIT NONE
     REAL(DbKi) , DIMENSION(:), ALLOCATABLE  :: Kurv      !< curvature at each node point [[1/m]]
     REAL(DbKi) , DIMENSION(:), ALLOCATABLE  :: dl_1      !< segment stretch attributed to static stiffness portion [[m]]
     REAL(DbKi) , DIMENSION(:), ALLOCATABLE  :: V      !< segment volume [[m^3]]
+    REAL(DbKi) , DIMENSION(:), ALLOCATABLE  :: F      !< VOF scalar for each segment (1 = fully submerged, 0 = out of water) [-]
     REAL(DbKi) , DIMENSION(:,:), ALLOCATABLE  :: U      !< water velocity at node [[m/s]]
     REAL(DbKi) , DIMENSION(:,:), ALLOCATABLE  :: Ud      !< water acceleration at node [[m/s^2]]
     REAL(DbKi) , DIMENSION(:), ALLOCATABLE  :: zeta      !< water surface elevation above node [[m]]
@@ -290,6 +306,15 @@ IMPLICIT NONE
     INTEGER(IntKi)  :: LineUnOut = 0_IntKi      !< unit number of line output file [-]
     REAL(DbKi) , DIMENSION(:), ALLOCATABLE  :: LineWrOutput      !< one row of output data for this line [-]
   END TYPE MD_Line
+! =======================
+! =========  MD_ExtLd  =======
+  TYPE, PUBLIC :: MD_ExtLd
+    INTEGER(IntKi)  :: IdNum = 0_IntKi      !< integer identifier of this external load entry [-]
+    REAL(DbKi) , DIMENSION(1:3)  :: Fext = 0.0_R8Ki      !< user-defined external force on the object [[N]]
+    REAL(DbKi) , DIMENSION(1:3)  :: Blin = 0.0_R8Ki      !< user-defined linear translational damping on the object [[N/(m/s)]]
+    REAL(DbKi) , DIMENSION(1:3)  :: Bquad = 0.0_R8Ki      !< user-defined quadratic translational damping on the object [[N/(m/s)^2]]
+    LOGICAL  :: isGlobal = .false.      !< external forces and damping to be applied in the global frame of reference [-]
+  END TYPE MD_ExtLd
 ! =======================
 ! =========  MD_Fail  =======
   TYPE, PUBLIC :: MD_Fail
@@ -364,6 +389,7 @@ IMPLICIT NONE
     TYPE(MD_Rod) , DIMENSION(:), ALLOCATABLE  :: RodList      !< array of rod objects [-]
     TYPE(MD_Point) , DIMENSION(:), ALLOCATABLE  :: PointList      !< array of point objects [-]
     TYPE(MD_Line) , DIMENSION(:), ALLOCATABLE  :: LineList      !< array of line objects [-]
+    TYPE(MD_ExtLd) , DIMENSION(:), ALLOCATABLE  :: ExtLdList      !< array of external load objects [-]
     TYPE(MD_Fail) , DIMENSION(:), ALLOCATABLE  :: FailList      !< array of line objects [-]
     INTEGER(IntKi) , DIMENSION(:), ALLOCATABLE  :: FreePointIs      !< array of free point indices in PointList vector []
     INTEGER(IntKi) , DIMENSION(:,:), ALLOCATABLE  :: CpldPointIs      !< array of coupled/fairlead point indices in PointList vector []
@@ -403,6 +429,7 @@ IMPLICIT NONE
     INTEGER(IntKi)  :: nBodies = 0      !< number of Body objects []
     INTEGER(IntKi)  :: nRods = 0      !< number of Rod objects []
     INTEGER(IntKi)  :: nLines = 0      !< number of Line objects []
+    INTEGER(IntKi)  :: nExtLds = 0      !< number of external loads or damping []
     INTEGER(IntKi)  :: nCtrlChans = 0      !< number of distinct control channels specified for use as inputs []
     INTEGER(IntKi)  :: nFails = 0      !< number of failure conditions []
     INTEGER(IntKi)  :: nFreeBodies = 0      !<  []
@@ -440,6 +467,7 @@ IMPLICIT NONE
     REAL(DbKi)  :: cv = 0.0_R8Ki      !< saturated damping coefficient [(-)]
     INTEGER(IntKi)  :: inertialF = 0      !< Indicates MoorDyn returning inertial moments for coupled 6DOF objects. 0: no, 1: yes, 2: yes with ramp to inertialF_rampT [-]
     REAL(R8Ki)  :: inertialF_rampT = 30      !< Ramp time for inertial forces [-]
+    INTEGER(IntKi)  :: OutSwitch = 1      !< Switch to disable outputs when running with full OF. 0: no MD main outfile, 1: write MD main outfile [(-)]
     INTEGER(IntKi)  :: nxWave = 0_IntKi      !< number of x wave grid points [-]
     INTEGER(IntKi)  :: nyWave = 0_IntKi      !< number of y wave grid points [-]
     INTEGER(IntKi)  :: nzWave = 0_IntKi      !< number of z wave grid points [-]
@@ -543,7 +571,7 @@ subroutine MD_CopyInitInput(SrcInitInputData, DstInitInputData, CtrlCode, ErrSta
    integer(IntKi),  intent(in   ) :: CtrlCode
    integer(IntKi),  intent(  out) :: ErrStat
    character(*),    intent(  out) :: ErrMsg
-   integer(B8Ki)                  :: LB(2), UB(2)
+   integer(B4Ki)                  :: LB(2), UB(2)
    integer(IntKi)                 :: ErrStat2
    character(ErrMsgLen)           :: ErrMsg2
    character(*), parameter        :: RoutineName = 'MD_CopyInitInput'
@@ -553,8 +581,8 @@ subroutine MD_CopyInitInput(SrcInitInputData, DstInitInputData, CtrlCode, ErrSta
    DstInitInputData%rhoW = SrcInitInputData%rhoW
    DstInitInputData%WtrDepth = SrcInitInputData%WtrDepth
    if (allocated(SrcInitInputData%PtfmInit)) then
-      LB(1:2) = lbound(SrcInitInputData%PtfmInit, kind=B8Ki)
-      UB(1:2) = ubound(SrcInitInputData%PtfmInit, kind=B8Ki)
+      LB(1:2) = lbound(SrcInitInputData%PtfmInit)
+      UB(1:2) = ubound(SrcInitInputData%PtfmInit)
       if (.not. allocated(DstInitInputData%PtfmInit)) then
          allocate(DstInitInputData%PtfmInit(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -566,8 +594,8 @@ subroutine MD_CopyInitInput(SrcInitInputData, DstInitInputData, CtrlCode, ErrSta
    end if
    DstInitInputData%FarmSize = SrcInitInputData%FarmSize
    if (allocated(SrcInitInputData%TurbineRefPos)) then
-      LB(1:2) = lbound(SrcInitInputData%TurbineRefPos, kind=B8Ki)
-      UB(1:2) = ubound(SrcInitInputData%TurbineRefPos, kind=B8Ki)
+      LB(1:2) = lbound(SrcInitInputData%TurbineRefPos)
+      UB(1:2) = ubound(SrcInitInputData%TurbineRefPos)
       if (.not. allocated(DstInitInputData%TurbineRefPos)) then
          allocate(DstInitInputData%TurbineRefPos(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -586,8 +614,8 @@ subroutine MD_CopyInitInput(SrcInitInputData, DstInitInputData, CtrlCode, ErrSta
    if (ErrStat >= AbortErrLev) return
    DstInitInputData%Echo = SrcInitInputData%Echo
    if (allocated(SrcInitInputData%OutList)) then
-      LB(1:1) = lbound(SrcInitInputData%OutList, kind=B8Ki)
-      UB(1:1) = ubound(SrcInitInputData%OutList, kind=B8Ki)
+      LB(1:1) = lbound(SrcInitInputData%OutList)
+      UB(1:1) = ubound(SrcInitInputData%OutList)
       if (.not. allocated(DstInitInputData%OutList)) then
          allocate(DstInitInputData%OutList(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -650,7 +678,7 @@ subroutine MD_UnPackInitInput(RF, OutData)
    type(RegFile), intent(inout)    :: RF
    type(MD_InitInputType), intent(inout) :: OutData
    character(*), parameter            :: RoutineName = 'MD_UnPackInitInput'
-   integer(B8Ki)   :: LB(2), UB(2)
+   integer(B4Ki)   :: LB(2), UB(2)
    integer(IntKi)  :: stat
    logical         :: IsAllocAssoc
    if (RF%ErrStat /= ErrID_None) return
@@ -686,6 +714,8 @@ subroutine MD_CopyLineProp(SrcLinePropData, DstLinePropData, CtrlCode, ErrStat, 
    DstLinePropData%w = SrcLinePropData%w
    DstLinePropData%EA = SrcLinePropData%EA
    DstLinePropData%EA_D = SrcLinePropData%EA_D
+   DstLinePropData%alphaMBL = SrcLinePropData%alphaMBL
+   DstLinePropData%vbeta = SrcLinePropData%vbeta
    DstLinePropData%BA = SrcLinePropData%BA
    DstLinePropData%BA_D = SrcLinePropData%BA_D
    DstLinePropData%EI = SrcLinePropData%EI
@@ -725,6 +755,8 @@ subroutine MD_PackLineProp(RF, Indata)
    call RegPack(RF, InData%w)
    call RegPack(RF, InData%EA)
    call RegPack(RF, InData%EA_D)
+   call RegPack(RF, InData%alphaMBL)
+   call RegPack(RF, InData%vbeta)
    call RegPack(RF, InData%BA)
    call RegPack(RF, InData%BA_D)
    call RegPack(RF, InData%EI)
@@ -756,6 +788,8 @@ subroutine MD_UnPackLineProp(RF, OutData)
    call RegUnpack(RF, OutData%w); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%EA); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%EA_D); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%alphaMBL); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%vbeta); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%BA); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%BA_D); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%EI); if (RegCheckErr(RF, RoutineName)) return
@@ -794,8 +828,6 @@ subroutine MD_CopyRodProp(SrcRodPropData, DstRodPropData, CtrlCode, ErrStat, Err
    DstRodPropData%Cdt = SrcRodPropData%Cdt
    DstRodPropData%CdEnd = SrcRodPropData%CdEnd
    DstRodPropData%CaEnd = SrcRodPropData%CaEnd
-   DstRodPropData%LinDamp = SrcRodPropData%LinDamp
-   DstRodPropData%isLinDamp = SrcRodPropData%isLinDamp
 end subroutine
 
 subroutine MD_DestroyRodProp(RodPropData, ErrStat, ErrMsg)
@@ -822,8 +854,6 @@ subroutine MD_PackRodProp(RF, Indata)
    call RegPack(RF, InData%Cdt)
    call RegPack(RF, InData%CdEnd)
    call RegPack(RF, InData%CaEnd)
-   call RegPack(RF, InData%LinDamp)
-   call RegPack(RF, InData%isLinDamp)
    if (RegCheckErr(RF, RoutineName)) return
 end subroutine
 
@@ -842,8 +872,6 @@ subroutine MD_UnPackRodProp(RF, OutData)
    call RegUnpack(RF, OutData%Cdt); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%CdEnd); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%CaEnd); if (RegCheckErr(RF, RoutineName)) return
-   call RegUnpack(RF, OutData%LinDamp); if (RegCheckErr(RF, RoutineName)) return
-   call RegUnpack(RF, OutData%isLinDamp); if (RegCheckErr(RF, RoutineName)) return
 end subroutine
 
 subroutine MD_CopyBody(SrcBodyData, DstBodyData, CtrlCode, ErrStat, ErrMsg)
@@ -881,6 +909,12 @@ subroutine MD_CopyBody(SrcBodyData, DstBodyData, CtrlCode, ErrStat, ErrMsg)
    DstBodyData%M0 = SrcBodyData%M0
    DstBodyData%OrMat = SrcBodyData%OrMat
    DstBodyData%rCG = SrcBodyData%rCG
+   DstBodyData%FextG = SrcBodyData%FextG
+   DstBodyData%BlinG = SrcBodyData%BlinG
+   DstBodyData%BquadG = SrcBodyData%BquadG
+   DstBodyData%FextL = SrcBodyData%FextL
+   DstBodyData%BlinL = SrcBodyData%BlinL
+   DstBodyData%BquadL = SrcBodyData%BquadL
 end subroutine
 
 subroutine MD_DestroyBody(BodyData, ErrStat, ErrMsg)
@@ -923,6 +957,12 @@ subroutine MD_PackBody(RF, Indata)
    call RegPack(RF, InData%M0)
    call RegPack(RF, InData%OrMat)
    call RegPack(RF, InData%rCG)
+   call RegPack(RF, InData%FextG)
+   call RegPack(RF, InData%BlinG)
+   call RegPack(RF, InData%BquadG)
+   call RegPack(RF, InData%FextL)
+   call RegPack(RF, InData%BlinL)
+   call RegPack(RF, InData%BquadL)
    if (RegCheckErr(RF, RoutineName)) return
 end subroutine
 
@@ -957,6 +997,12 @@ subroutine MD_UnPackBody(RF, OutData)
    call RegUnpack(RF, OutData%M0); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%OrMat); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%rCG); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%FextG); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%BlinG); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%BquadG); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%FextL); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%BlinL); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%BquadL); if (RegCheckErr(RF, RoutineName)) return
 end subroutine
 
 subroutine MD_CopyPoint(SrcPointData, DstPointData, CtrlCode, ErrStat, ErrMsg)
@@ -965,7 +1011,7 @@ subroutine MD_CopyPoint(SrcPointData, DstPointData, CtrlCode, ErrStat, ErrMsg)
    integer(IntKi),  intent(in   ) :: CtrlCode
    integer(IntKi),  intent(  out) :: ErrStat
    character(*),    intent(  out) :: ErrMsg
-   integer(B8Ki)                  :: LB(2), UB(2)
+   integer(B4Ki)                  :: LB(2), UB(2)
    integer(IntKi)                 :: ErrStat2
    character(*), parameter        :: RoutineName = 'MD_CopyPoint'
    ErrStat = ErrID_None
@@ -991,8 +1037,8 @@ subroutine MD_CopyPoint(SrcPointData, DstPointData, CtrlCode, ErrStat, ErrMsg)
    DstPointData%Ud = SrcPointData%Ud
    DstPointData%zeta = SrcPointData%zeta
    if (allocated(SrcPointData%PDyn)) then
-      LB(1:1) = lbound(SrcPointData%PDyn, kind=B8Ki)
-      UB(1:1) = ubound(SrcPointData%PDyn, kind=B8Ki)
+      LB(1:1) = lbound(SrcPointData%PDyn)
+      UB(1:1) = ubound(SrcPointData%PDyn)
       if (.not. allocated(DstPointData%PDyn)) then
          allocate(DstPointData%PDyn(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1004,6 +1050,9 @@ subroutine MD_CopyPoint(SrcPointData, DstPointData, CtrlCode, ErrStat, ErrMsg)
    end if
    DstPointData%Fnet = SrcPointData%Fnet
    DstPointData%M = SrcPointData%M
+   DstPointData%Fext = SrcPointData%Fext
+   DstPointData%Blin = SrcPointData%Blin
+   DstPointData%Bquad = SrcPointData%Bquad
 end subroutine
 
 subroutine MD_DestroyPoint(PointData, ErrStat, ErrMsg)
@@ -1046,6 +1095,9 @@ subroutine MD_PackPoint(RF, Indata)
    call RegPackAlloc(RF, InData%PDyn)
    call RegPack(RF, InData%Fnet)
    call RegPack(RF, InData%M)
+   call RegPack(RF, InData%Fext)
+   call RegPack(RF, InData%Blin)
+   call RegPack(RF, InData%Bquad)
    if (RegCheckErr(RF, RoutineName)) return
 end subroutine
 
@@ -1053,7 +1105,7 @@ subroutine MD_UnPackPoint(RF, OutData)
    type(RegFile), intent(inout)    :: RF
    type(MD_Point), intent(inout) :: OutData
    character(*), parameter            :: RoutineName = 'MD_UnPackPoint'
-   integer(B8Ki)   :: LB(2), UB(2)
+   integer(B4Ki)   :: LB(2), UB(2)
    integer(IntKi)  :: stat
    logical         :: IsAllocAssoc
    if (RF%ErrStat /= ErrID_None) return
@@ -1080,6 +1132,9 @@ subroutine MD_UnPackPoint(RF, OutData)
    call RegUnpackAlloc(RF, OutData%PDyn); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%Fnet); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%M); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%Fext); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%Blin); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%Bquad); if (RegCheckErr(RF, RoutineName)) return
 end subroutine
 
 subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
@@ -1088,7 +1143,7 @@ subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
    integer(IntKi),  intent(in   ) :: CtrlCode
    integer(IntKi),  intent(  out) :: ErrStat
    character(*),    intent(  out) :: ErrMsg
-   integer(B8Ki)                  :: LB(3), UB(3)
+   integer(B4Ki)                  :: LB(3), UB(3)
    integer(IntKi)                 :: ErrStat2
    character(*), parameter        :: RoutineName = 'MD_CopyRod'
    ErrStat = ErrID_None
@@ -1117,15 +1172,13 @@ subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
    DstRodData%Cdt = SrcRodData%Cdt
    DstRodData%CdEnd = SrcRodData%CdEnd
    DstRodData%CaEnd = SrcRodData%CaEnd
-   DstRodData%LinDamp = SrcRodData%LinDamp
-   DstRodData%isLinDamp = SrcRodData%isLinDamp
    DstRodData%time = SrcRodData%time
    DstRodData%roll = SrcRodData%roll
    DstRodData%pitch = SrcRodData%pitch
    DstRodData%h0 = SrcRodData%h0
    if (allocated(SrcRodData%r)) then
-      LB(1:2) = lbound(SrcRodData%r, kind=B8Ki)
-      UB(1:2) = ubound(SrcRodData%r, kind=B8Ki)
+      LB(1:2) = lbound(SrcRodData%r)
+      UB(1:2) = ubound(SrcRodData%r)
       if (.not. allocated(DstRodData%r)) then
          allocate(DstRodData%r(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1136,8 +1189,8 @@ subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
       DstRodData%r = SrcRodData%r
    end if
    if (allocated(SrcRodData%rd)) then
-      LB(1:2) = lbound(SrcRodData%rd, kind=B8Ki)
-      UB(1:2) = ubound(SrcRodData%rd, kind=B8Ki)
+      LB(1:2) = lbound(SrcRodData%rd)
+      UB(1:2) = ubound(SrcRodData%rd)
       if (.not. allocated(DstRodData%rd)) then
          allocate(DstRodData%rd(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1149,8 +1202,8 @@ subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
    end if
    DstRodData%q = SrcRodData%q
    if (allocated(SrcRodData%l)) then
-      LB(1:1) = lbound(SrcRodData%l, kind=B8Ki)
-      UB(1:1) = ubound(SrcRodData%l, kind=B8Ki)
+      LB(1:1) = lbound(SrcRodData%l)
+      UB(1:1) = ubound(SrcRodData%l)
       if (.not. allocated(DstRodData%l)) then
          allocate(DstRodData%l(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1161,8 +1214,8 @@ subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
       DstRodData%l = SrcRodData%l
    end if
    if (allocated(SrcRodData%V)) then
-      LB(1:1) = lbound(SrcRodData%V, kind=B8Ki)
-      UB(1:1) = ubound(SrcRodData%V, kind=B8Ki)
+      LB(1:1) = lbound(SrcRodData%V)
+      UB(1:1) = ubound(SrcRodData%V)
       if (.not. allocated(DstRodData%V)) then
          allocate(DstRodData%V(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1173,8 +1226,8 @@ subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
       DstRodData%V = SrcRodData%V
    end if
    if (allocated(SrcRodData%U)) then
-      LB(1:2) = lbound(SrcRodData%U, kind=B8Ki)
-      UB(1:2) = ubound(SrcRodData%U, kind=B8Ki)
+      LB(1:2) = lbound(SrcRodData%U)
+      UB(1:2) = ubound(SrcRodData%U)
       if (.not. allocated(DstRodData%U)) then
          allocate(DstRodData%U(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1185,8 +1238,8 @@ subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
       DstRodData%U = SrcRodData%U
    end if
    if (allocated(SrcRodData%Ud)) then
-      LB(1:2) = lbound(SrcRodData%Ud, kind=B8Ki)
-      UB(1:2) = ubound(SrcRodData%Ud, kind=B8Ki)
+      LB(1:2) = lbound(SrcRodData%Ud)
+      UB(1:2) = ubound(SrcRodData%Ud)
       if (.not. allocated(DstRodData%Ud)) then
          allocate(DstRodData%Ud(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1197,8 +1250,8 @@ subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
       DstRodData%Ud = SrcRodData%Ud
    end if
    if (allocated(SrcRodData%zeta)) then
-      LB(1:1) = lbound(SrcRodData%zeta, kind=B8Ki)
-      UB(1:1) = ubound(SrcRodData%zeta, kind=B8Ki)
+      LB(1:1) = lbound(SrcRodData%zeta)
+      UB(1:1) = ubound(SrcRodData%zeta)
       if (.not. allocated(DstRodData%zeta)) then
          allocate(DstRodData%zeta(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1209,8 +1262,8 @@ subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
       DstRodData%zeta = SrcRodData%zeta
    end if
    if (allocated(SrcRodData%PDyn)) then
-      LB(1:1) = lbound(SrcRodData%PDyn, kind=B8Ki)
-      UB(1:1) = ubound(SrcRodData%PDyn, kind=B8Ki)
+      LB(1:1) = lbound(SrcRodData%PDyn)
+      UB(1:1) = ubound(SrcRodData%PDyn)
       if (.not. allocated(DstRodData%PDyn)) then
          allocate(DstRodData%PDyn(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1221,8 +1274,8 @@ subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
       DstRodData%PDyn = SrcRodData%PDyn
    end if
    if (allocated(SrcRodData%W)) then
-      LB(1:2) = lbound(SrcRodData%W, kind=B8Ki)
-      UB(1:2) = ubound(SrcRodData%W, kind=B8Ki)
+      LB(1:2) = lbound(SrcRodData%W)
+      UB(1:2) = ubound(SrcRodData%W)
       if (.not. allocated(DstRodData%W)) then
          allocate(DstRodData%W(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1233,8 +1286,8 @@ subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
       DstRodData%W = SrcRodData%W
    end if
    if (allocated(SrcRodData%Bo)) then
-      LB(1:2) = lbound(SrcRodData%Bo, kind=B8Ki)
-      UB(1:2) = ubound(SrcRodData%Bo, kind=B8Ki)
+      LB(1:2) = lbound(SrcRodData%Bo)
+      UB(1:2) = ubound(SrcRodData%Bo)
       if (.not. allocated(DstRodData%Bo)) then
          allocate(DstRodData%Bo(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1245,8 +1298,8 @@ subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
       DstRodData%Bo = SrcRodData%Bo
    end if
    if (allocated(SrcRodData%Pd)) then
-      LB(1:2) = lbound(SrcRodData%Pd, kind=B8Ki)
-      UB(1:2) = ubound(SrcRodData%Pd, kind=B8Ki)
+      LB(1:2) = lbound(SrcRodData%Pd)
+      UB(1:2) = ubound(SrcRodData%Pd)
       if (.not. allocated(DstRodData%Pd)) then
          allocate(DstRodData%Pd(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1257,8 +1310,8 @@ subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
       DstRodData%Pd = SrcRodData%Pd
    end if
    if (allocated(SrcRodData%Dp)) then
-      LB(1:2) = lbound(SrcRodData%Dp, kind=B8Ki)
-      UB(1:2) = ubound(SrcRodData%Dp, kind=B8Ki)
+      LB(1:2) = lbound(SrcRodData%Dp)
+      UB(1:2) = ubound(SrcRodData%Dp)
       if (.not. allocated(DstRodData%Dp)) then
          allocate(DstRodData%Dp(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1269,8 +1322,8 @@ subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
       DstRodData%Dp = SrcRodData%Dp
    end if
    if (allocated(SrcRodData%Dq)) then
-      LB(1:2) = lbound(SrcRodData%Dq, kind=B8Ki)
-      UB(1:2) = ubound(SrcRodData%Dq, kind=B8Ki)
+      LB(1:2) = lbound(SrcRodData%Dq)
+      UB(1:2) = ubound(SrcRodData%Dq)
       if (.not. allocated(DstRodData%Dq)) then
          allocate(DstRodData%Dq(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1281,8 +1334,8 @@ subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
       DstRodData%Dq = SrcRodData%Dq
    end if
    if (allocated(SrcRodData%Ap)) then
-      LB(1:2) = lbound(SrcRodData%Ap, kind=B8Ki)
-      UB(1:2) = ubound(SrcRodData%Ap, kind=B8Ki)
+      LB(1:2) = lbound(SrcRodData%Ap)
+      UB(1:2) = ubound(SrcRodData%Ap)
       if (.not. allocated(DstRodData%Ap)) then
          allocate(DstRodData%Ap(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1293,8 +1346,8 @@ subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
       DstRodData%Ap = SrcRodData%Ap
    end if
    if (allocated(SrcRodData%Aq)) then
-      LB(1:2) = lbound(SrcRodData%Aq, kind=B8Ki)
-      UB(1:2) = ubound(SrcRodData%Aq, kind=B8Ki)
+      LB(1:2) = lbound(SrcRodData%Aq)
+      UB(1:2) = ubound(SrcRodData%Aq)
       if (.not. allocated(DstRodData%Aq)) then
          allocate(DstRodData%Aq(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1305,8 +1358,8 @@ subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
       DstRodData%Aq = SrcRodData%Aq
    end if
    if (allocated(SrcRodData%B)) then
-      LB(1:2) = lbound(SrcRodData%B, kind=B8Ki)
-      UB(1:2) = ubound(SrcRodData%B, kind=B8Ki)
+      LB(1:2) = lbound(SrcRodData%B)
+      UB(1:2) = ubound(SrcRodData%B)
       if (.not. allocated(DstRodData%B)) then
          allocate(DstRodData%B(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1316,9 +1369,33 @@ subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
       end if
       DstRodData%B = SrcRodData%B
    end if
+   if (allocated(SrcRodData%Bp)) then
+      LB(1:2) = lbound(SrcRodData%Bp)
+      UB(1:2) = ubound(SrcRodData%Bp)
+      if (.not. allocated(DstRodData%Bp)) then
+         allocate(DstRodData%Bp(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
+         if (ErrStat2 /= 0) then
+            call SetErrStat(ErrID_Fatal, 'Error allocating DstRodData%Bp.', ErrStat, ErrMsg, RoutineName)
+            return
+         end if
+      end if
+      DstRodData%Bp = SrcRodData%Bp
+   end if
+   if (allocated(SrcRodData%Bq)) then
+      LB(1:2) = lbound(SrcRodData%Bq)
+      UB(1:2) = ubound(SrcRodData%Bq)
+      if (.not. allocated(DstRodData%Bq)) then
+         allocate(DstRodData%Bq(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
+         if (ErrStat2 /= 0) then
+            call SetErrStat(ErrID_Fatal, 'Error allocating DstRodData%Bq.', ErrStat, ErrMsg, RoutineName)
+            return
+         end if
+      end if
+      DstRodData%Bq = SrcRodData%Bq
+   end if
    if (allocated(SrcRodData%Fnet)) then
-      LB(1:2) = lbound(SrcRodData%Fnet, kind=B8Ki)
-      UB(1:2) = ubound(SrcRodData%Fnet, kind=B8Ki)
+      LB(1:2) = lbound(SrcRodData%Fnet)
+      UB(1:2) = ubound(SrcRodData%Fnet)
       if (.not. allocated(DstRodData%Fnet)) then
          allocate(DstRodData%Fnet(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1329,8 +1406,8 @@ subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
       DstRodData%Fnet = SrcRodData%Fnet
    end if
    if (allocated(SrcRodData%M)) then
-      LB(1:3) = lbound(SrcRodData%M, kind=B8Ki)
-      UB(1:3) = ubound(SrcRodData%M, kind=B8Ki)
+      LB(1:3) = lbound(SrcRodData%M)
+      UB(1:3) = ubound(SrcRodData%M)
       if (.not. allocated(DstRodData%M)) then
          allocate(DstRodData%M(LB(1):UB(1),LB(2):UB(2),LB(3):UB(3)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1348,11 +1425,12 @@ subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
    DstRodData%a6 = SrcRodData%a6
    DstRodData%F6net = SrcRodData%F6net
    DstRodData%M6net = SrcRodData%M6net
+   DstRodData%Imat = SrcRodData%Imat
    DstRodData%OrMat = SrcRodData%OrMat
    DstRodData%RodUnOut = SrcRodData%RodUnOut
    if (allocated(SrcRodData%RodWrOutput)) then
-      LB(1:1) = lbound(SrcRodData%RodWrOutput, kind=B8Ki)
-      UB(1:1) = ubound(SrcRodData%RodWrOutput, kind=B8Ki)
+      LB(1:1) = lbound(SrcRodData%RodWrOutput)
+      UB(1:1) = ubound(SrcRodData%RodWrOutput)
       if (.not. allocated(DstRodData%RodWrOutput)) then
          allocate(DstRodData%RodWrOutput(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1362,6 +1440,9 @@ subroutine MD_CopyRod(SrcRodData, DstRodData, CtrlCode, ErrStat, ErrMsg)
       end if
       DstRodData%RodWrOutput = SrcRodData%RodWrOutput
    end if
+   DstRodData%FextU = SrcRodData%FextU
+   DstRodData%Blin = SrcRodData%Blin
+   DstRodData%Bquad = SrcRodData%Bquad
 end subroutine
 
 subroutine MD_DestroyRod(RodData, ErrStat, ErrMsg)
@@ -1419,6 +1500,12 @@ subroutine MD_DestroyRod(RodData, ErrStat, ErrMsg)
    if (allocated(RodData%B)) then
       deallocate(RodData%B)
    end if
+   if (allocated(RodData%Bp)) then
+      deallocate(RodData%Bp)
+   end if
+   if (allocated(RodData%Bq)) then
+      deallocate(RodData%Bq)
+   end if
    if (allocated(RodData%Fnet)) then
       deallocate(RodData%Fnet)
    end if
@@ -1459,8 +1546,6 @@ subroutine MD_PackRod(RF, Indata)
    call RegPack(RF, InData%Cdt)
    call RegPack(RF, InData%CdEnd)
    call RegPack(RF, InData%CaEnd)
-   call RegPack(RF, InData%LinDamp)
-   call RegPack(RF, InData%isLinDamp)
    call RegPack(RF, InData%time)
    call RegPack(RF, InData%roll)
    call RegPack(RF, InData%pitch)
@@ -1482,6 +1567,8 @@ subroutine MD_PackRod(RF, Indata)
    call RegPackAlloc(RF, InData%Ap)
    call RegPackAlloc(RF, InData%Aq)
    call RegPackAlloc(RF, InData%B)
+   call RegPackAlloc(RF, InData%Bp)
+   call RegPackAlloc(RF, InData%Bq)
    call RegPackAlloc(RF, InData%Fnet)
    call RegPackAlloc(RF, InData%M)
    call RegPack(RF, InData%FextA)
@@ -1492,9 +1579,13 @@ subroutine MD_PackRod(RF, Indata)
    call RegPack(RF, InData%a6)
    call RegPack(RF, InData%F6net)
    call RegPack(RF, InData%M6net)
+   call RegPack(RF, InData%Imat)
    call RegPack(RF, InData%OrMat)
    call RegPack(RF, InData%RodUnOut)
    call RegPackAlloc(RF, InData%RodWrOutput)
+   call RegPack(RF, InData%FextU)
+   call RegPack(RF, InData%Blin)
+   call RegPack(RF, InData%Bquad)
    if (RegCheckErr(RF, RoutineName)) return
 end subroutine
 
@@ -1502,7 +1593,7 @@ subroutine MD_UnPackRod(RF, OutData)
    type(RegFile), intent(inout)    :: RF
    type(MD_Rod), intent(inout) :: OutData
    character(*), parameter            :: RoutineName = 'MD_UnPackRod'
-   integer(B8Ki)   :: LB(3), UB(3)
+   integer(B4Ki)   :: LB(3), UB(3)
    integer(IntKi)  :: stat
    logical         :: IsAllocAssoc
    if (RF%ErrStat /= ErrID_None) return
@@ -1530,8 +1621,6 @@ subroutine MD_UnPackRod(RF, OutData)
    call RegUnpack(RF, OutData%Cdt); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%CdEnd); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%CaEnd); if (RegCheckErr(RF, RoutineName)) return
-   call RegUnpack(RF, OutData%LinDamp); if (RegCheckErr(RF, RoutineName)) return
-   call RegUnpack(RF, OutData%isLinDamp); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%time); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%roll); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%pitch); if (RegCheckErr(RF, RoutineName)) return
@@ -1553,6 +1642,8 @@ subroutine MD_UnPackRod(RF, OutData)
    call RegUnpackAlloc(RF, OutData%Ap); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpackAlloc(RF, OutData%Aq); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpackAlloc(RF, OutData%B); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpackAlloc(RF, OutData%Bp); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpackAlloc(RF, OutData%Bq); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpackAlloc(RF, OutData%Fnet); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpackAlloc(RF, OutData%M); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%FextA); if (RegCheckErr(RF, RoutineName)) return
@@ -1563,9 +1654,13 @@ subroutine MD_UnPackRod(RF, OutData)
    call RegUnpack(RF, OutData%a6); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%F6net); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%M6net); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%Imat); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%OrMat); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%RodUnOut); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpackAlloc(RF, OutData%RodWrOutput); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%FextU); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%Blin); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%Bquad); if (RegCheckErr(RF, RoutineName)) return
 end subroutine
 
 subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
@@ -1574,7 +1669,7 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
    integer(IntKi),  intent(in   ) :: CtrlCode
    integer(IntKi),  intent(  out) :: ErrStat
    character(*),    intent(  out) :: ErrMsg
-   integer(B8Ki)                  :: LB(3), UB(3)
+   integer(B4Ki)                  :: LB(3), UB(3)
    integer(IntKi)                 :: ErrStat2
    character(*), parameter        :: RoutineName = 'MD_CopyLine'
    ErrStat = ErrID_None
@@ -1594,6 +1689,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
    DstLineData%d = SrcLineData%d
    DstLineData%EA = SrcLineData%EA
    DstLineData%EA_D = SrcLineData%EA_D
+   DstLineData%alphaMBL = SrcLineData%alphaMBL
+   DstLineData%vbeta = SrcLineData%vbeta
    DstLineData%BA = SrcLineData%BA
    DstLineData%BA_D = SrcLineData%BA_D
    DstLineData%EI = SrcLineData%EI
@@ -1612,8 +1709,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
    DstLineData%bstiffYs = SrcLineData%bstiffYs
    DstLineData%time = SrcLineData%time
    if (allocated(SrcLineData%r)) then
-      LB(1:2) = lbound(SrcLineData%r, kind=B8Ki)
-      UB(1:2) = ubound(SrcLineData%r, kind=B8Ki)
+      LB(1:2) = lbound(SrcLineData%r)
+      UB(1:2) = ubound(SrcLineData%r)
       if (.not. allocated(DstLineData%r)) then
          allocate(DstLineData%r(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1624,8 +1721,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%r = SrcLineData%r
    end if
    if (allocated(SrcLineData%rd)) then
-      LB(1:2) = lbound(SrcLineData%rd, kind=B8Ki)
-      UB(1:2) = ubound(SrcLineData%rd, kind=B8Ki)
+      LB(1:2) = lbound(SrcLineData%rd)
+      UB(1:2) = ubound(SrcLineData%rd)
       if (.not. allocated(DstLineData%rd)) then
          allocate(DstLineData%rd(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1636,8 +1733,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%rd = SrcLineData%rd
    end if
    if (allocated(SrcLineData%q)) then
-      LB(1:2) = lbound(SrcLineData%q, kind=B8Ki)
-      UB(1:2) = ubound(SrcLineData%q, kind=B8Ki)
+      LB(1:2) = lbound(SrcLineData%q)
+      UB(1:2) = ubound(SrcLineData%q)
       if (.not. allocated(DstLineData%q)) then
          allocate(DstLineData%q(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1648,8 +1745,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%q = SrcLineData%q
    end if
    if (allocated(SrcLineData%qs)) then
-      LB(1:2) = lbound(SrcLineData%qs, kind=B8Ki)
-      UB(1:2) = ubound(SrcLineData%qs, kind=B8Ki)
+      LB(1:2) = lbound(SrcLineData%qs)
+      UB(1:2) = ubound(SrcLineData%qs)
       if (.not. allocated(DstLineData%qs)) then
          allocate(DstLineData%qs(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1660,8 +1757,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%qs = SrcLineData%qs
    end if
    if (allocated(SrcLineData%l)) then
-      LB(1:1) = lbound(SrcLineData%l, kind=B8Ki)
-      UB(1:1) = ubound(SrcLineData%l, kind=B8Ki)
+      LB(1:1) = lbound(SrcLineData%l)
+      UB(1:1) = ubound(SrcLineData%l)
       if (.not. allocated(DstLineData%l)) then
          allocate(DstLineData%l(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1672,8 +1769,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%l = SrcLineData%l
    end if
    if (allocated(SrcLineData%ld)) then
-      LB(1:1) = lbound(SrcLineData%ld, kind=B8Ki)
-      UB(1:1) = ubound(SrcLineData%ld, kind=B8Ki)
+      LB(1:1) = lbound(SrcLineData%ld)
+      UB(1:1) = ubound(SrcLineData%ld)
       if (.not. allocated(DstLineData%ld)) then
          allocate(DstLineData%ld(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1684,8 +1781,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%ld = SrcLineData%ld
    end if
    if (allocated(SrcLineData%lstr)) then
-      LB(1:1) = lbound(SrcLineData%lstr, kind=B8Ki)
-      UB(1:1) = ubound(SrcLineData%lstr, kind=B8Ki)
+      LB(1:1) = lbound(SrcLineData%lstr)
+      UB(1:1) = ubound(SrcLineData%lstr)
       if (.not. allocated(DstLineData%lstr)) then
          allocate(DstLineData%lstr(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1696,8 +1793,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%lstr = SrcLineData%lstr
    end if
    if (allocated(SrcLineData%lstrd)) then
-      LB(1:1) = lbound(SrcLineData%lstrd, kind=B8Ki)
-      UB(1:1) = ubound(SrcLineData%lstrd, kind=B8Ki)
+      LB(1:1) = lbound(SrcLineData%lstrd)
+      UB(1:1) = ubound(SrcLineData%lstrd)
       if (.not. allocated(DstLineData%lstrd)) then
          allocate(DstLineData%lstrd(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1708,8 +1805,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%lstrd = SrcLineData%lstrd
    end if
    if (allocated(SrcLineData%Kurv)) then
-      LB(1:1) = lbound(SrcLineData%Kurv, kind=B8Ki)
-      UB(1:1) = ubound(SrcLineData%Kurv, kind=B8Ki)
+      LB(1:1) = lbound(SrcLineData%Kurv)
+      UB(1:1) = ubound(SrcLineData%Kurv)
       if (.not. allocated(DstLineData%Kurv)) then
          allocate(DstLineData%Kurv(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1720,8 +1817,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%Kurv = SrcLineData%Kurv
    end if
    if (allocated(SrcLineData%dl_1)) then
-      LB(1:1) = lbound(SrcLineData%dl_1, kind=B8Ki)
-      UB(1:1) = ubound(SrcLineData%dl_1, kind=B8Ki)
+      LB(1:1) = lbound(SrcLineData%dl_1)
+      UB(1:1) = ubound(SrcLineData%dl_1)
       if (.not. allocated(DstLineData%dl_1)) then
          allocate(DstLineData%dl_1(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1732,8 +1829,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%dl_1 = SrcLineData%dl_1
    end if
    if (allocated(SrcLineData%V)) then
-      LB(1:1) = lbound(SrcLineData%V, kind=B8Ki)
-      UB(1:1) = ubound(SrcLineData%V, kind=B8Ki)
+      LB(1:1) = lbound(SrcLineData%V)
+      UB(1:1) = ubound(SrcLineData%V)
       if (.not. allocated(DstLineData%V)) then
          allocate(DstLineData%V(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1743,9 +1840,21 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       end if
       DstLineData%V = SrcLineData%V
    end if
+   if (allocated(SrcLineData%F)) then
+      LB(1:1) = lbound(SrcLineData%F)
+      UB(1:1) = ubound(SrcLineData%F)
+      if (.not. allocated(DstLineData%F)) then
+         allocate(DstLineData%F(LB(1):UB(1)), stat=ErrStat2)
+         if (ErrStat2 /= 0) then
+            call SetErrStat(ErrID_Fatal, 'Error allocating DstLineData%F.', ErrStat, ErrMsg, RoutineName)
+            return
+         end if
+      end if
+      DstLineData%F = SrcLineData%F
+   end if
    if (allocated(SrcLineData%U)) then
-      LB(1:2) = lbound(SrcLineData%U, kind=B8Ki)
-      UB(1:2) = ubound(SrcLineData%U, kind=B8Ki)
+      LB(1:2) = lbound(SrcLineData%U)
+      UB(1:2) = ubound(SrcLineData%U)
       if (.not. allocated(DstLineData%U)) then
          allocate(DstLineData%U(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1756,8 +1865,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%U = SrcLineData%U
    end if
    if (allocated(SrcLineData%Ud)) then
-      LB(1:2) = lbound(SrcLineData%Ud, kind=B8Ki)
-      UB(1:2) = ubound(SrcLineData%Ud, kind=B8Ki)
+      LB(1:2) = lbound(SrcLineData%Ud)
+      UB(1:2) = ubound(SrcLineData%Ud)
       if (.not. allocated(DstLineData%Ud)) then
          allocate(DstLineData%Ud(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1768,8 +1877,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%Ud = SrcLineData%Ud
    end if
    if (allocated(SrcLineData%zeta)) then
-      LB(1:1) = lbound(SrcLineData%zeta, kind=B8Ki)
-      UB(1:1) = ubound(SrcLineData%zeta, kind=B8Ki)
+      LB(1:1) = lbound(SrcLineData%zeta)
+      UB(1:1) = ubound(SrcLineData%zeta)
       if (.not. allocated(DstLineData%zeta)) then
          allocate(DstLineData%zeta(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1780,8 +1889,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%zeta = SrcLineData%zeta
    end if
    if (allocated(SrcLineData%PDyn)) then
-      LB(1:1) = lbound(SrcLineData%PDyn, kind=B8Ki)
-      UB(1:1) = ubound(SrcLineData%PDyn, kind=B8Ki)
+      LB(1:1) = lbound(SrcLineData%PDyn)
+      UB(1:1) = ubound(SrcLineData%PDyn)
       if (.not. allocated(DstLineData%PDyn)) then
          allocate(DstLineData%PDyn(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1792,8 +1901,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%PDyn = SrcLineData%PDyn
    end if
    if (allocated(SrcLineData%T)) then
-      LB(1:2) = lbound(SrcLineData%T, kind=B8Ki)
-      UB(1:2) = ubound(SrcLineData%T, kind=B8Ki)
+      LB(1:2) = lbound(SrcLineData%T)
+      UB(1:2) = ubound(SrcLineData%T)
       if (.not. allocated(DstLineData%T)) then
          allocate(DstLineData%T(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1804,8 +1913,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%T = SrcLineData%T
    end if
    if (allocated(SrcLineData%Td)) then
-      LB(1:2) = lbound(SrcLineData%Td, kind=B8Ki)
-      UB(1:2) = ubound(SrcLineData%Td, kind=B8Ki)
+      LB(1:2) = lbound(SrcLineData%Td)
+      UB(1:2) = ubound(SrcLineData%Td)
       if (.not. allocated(DstLineData%Td)) then
          allocate(DstLineData%Td(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1816,8 +1925,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%Td = SrcLineData%Td
    end if
    if (allocated(SrcLineData%W)) then
-      LB(1:2) = lbound(SrcLineData%W, kind=B8Ki)
-      UB(1:2) = ubound(SrcLineData%W, kind=B8Ki)
+      LB(1:2) = lbound(SrcLineData%W)
+      UB(1:2) = ubound(SrcLineData%W)
       if (.not. allocated(DstLineData%W)) then
          allocate(DstLineData%W(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1828,8 +1937,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%W = SrcLineData%W
    end if
    if (allocated(SrcLineData%Dp)) then
-      LB(1:2) = lbound(SrcLineData%Dp, kind=B8Ki)
-      UB(1:2) = ubound(SrcLineData%Dp, kind=B8Ki)
+      LB(1:2) = lbound(SrcLineData%Dp)
+      UB(1:2) = ubound(SrcLineData%Dp)
       if (.not. allocated(DstLineData%Dp)) then
          allocate(DstLineData%Dp(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1840,8 +1949,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%Dp = SrcLineData%Dp
    end if
    if (allocated(SrcLineData%Dq)) then
-      LB(1:2) = lbound(SrcLineData%Dq, kind=B8Ki)
-      UB(1:2) = ubound(SrcLineData%Dq, kind=B8Ki)
+      LB(1:2) = lbound(SrcLineData%Dq)
+      UB(1:2) = ubound(SrcLineData%Dq)
       if (.not. allocated(DstLineData%Dq)) then
          allocate(DstLineData%Dq(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1852,8 +1961,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%Dq = SrcLineData%Dq
    end if
    if (allocated(SrcLineData%Ap)) then
-      LB(1:2) = lbound(SrcLineData%Ap, kind=B8Ki)
-      UB(1:2) = ubound(SrcLineData%Ap, kind=B8Ki)
+      LB(1:2) = lbound(SrcLineData%Ap)
+      UB(1:2) = ubound(SrcLineData%Ap)
       if (.not. allocated(DstLineData%Ap)) then
          allocate(DstLineData%Ap(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1864,8 +1973,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%Ap = SrcLineData%Ap
    end if
    if (allocated(SrcLineData%Aq)) then
-      LB(1:2) = lbound(SrcLineData%Aq, kind=B8Ki)
-      UB(1:2) = ubound(SrcLineData%Aq, kind=B8Ki)
+      LB(1:2) = lbound(SrcLineData%Aq)
+      UB(1:2) = ubound(SrcLineData%Aq)
       if (.not. allocated(DstLineData%Aq)) then
          allocate(DstLineData%Aq(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1876,8 +1985,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%Aq = SrcLineData%Aq
    end if
    if (allocated(SrcLineData%B)) then
-      LB(1:2) = lbound(SrcLineData%B, kind=B8Ki)
-      UB(1:2) = ubound(SrcLineData%B, kind=B8Ki)
+      LB(1:2) = lbound(SrcLineData%B)
+      UB(1:2) = ubound(SrcLineData%B)
       if (.not. allocated(DstLineData%B)) then
          allocate(DstLineData%B(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1888,8 +1997,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%B = SrcLineData%B
    end if
    if (allocated(SrcLineData%Bs)) then
-      LB(1:2) = lbound(SrcLineData%Bs, kind=B8Ki)
-      UB(1:2) = ubound(SrcLineData%Bs, kind=B8Ki)
+      LB(1:2) = lbound(SrcLineData%Bs)
+      UB(1:2) = ubound(SrcLineData%Bs)
       if (.not. allocated(DstLineData%Bs)) then
          allocate(DstLineData%Bs(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1900,8 +2009,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%Bs = SrcLineData%Bs
    end if
    if (allocated(SrcLineData%Fnet)) then
-      LB(1:2) = lbound(SrcLineData%Fnet, kind=B8Ki)
-      UB(1:2) = ubound(SrcLineData%Fnet, kind=B8Ki)
+      LB(1:2) = lbound(SrcLineData%Fnet)
+      UB(1:2) = ubound(SrcLineData%Fnet)
       if (.not. allocated(DstLineData%Fnet)) then
          allocate(DstLineData%Fnet(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1912,8 +2021,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%Fnet = SrcLineData%Fnet
    end if
    if (allocated(SrcLineData%S)) then
-      LB(1:3) = lbound(SrcLineData%S, kind=B8Ki)
-      UB(1:3) = ubound(SrcLineData%S, kind=B8Ki)
+      LB(1:3) = lbound(SrcLineData%S)
+      UB(1:3) = ubound(SrcLineData%S)
       if (.not. allocated(DstLineData%S)) then
          allocate(DstLineData%S(LB(1):UB(1),LB(2):UB(2),LB(3):UB(3)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1924,8 +2033,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
       DstLineData%S = SrcLineData%S
    end if
    if (allocated(SrcLineData%M)) then
-      LB(1:3) = lbound(SrcLineData%M, kind=B8Ki)
-      UB(1:3) = ubound(SrcLineData%M, kind=B8Ki)
+      LB(1:3) = lbound(SrcLineData%M)
+      UB(1:3) = ubound(SrcLineData%M)
       if (.not. allocated(DstLineData%M)) then
          allocate(DstLineData%M(LB(1):UB(1),LB(2):UB(2),LB(3):UB(3)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1939,8 +2048,8 @@ subroutine MD_CopyLine(SrcLineData, DstLineData, CtrlCode, ErrStat, ErrMsg)
    DstLineData%EndMomentB = SrcLineData%EndMomentB
    DstLineData%LineUnOut = SrcLineData%LineUnOut
    if (allocated(SrcLineData%LineWrOutput)) then
-      LB(1:1) = lbound(SrcLineData%LineWrOutput, kind=B8Ki)
-      UB(1:1) = ubound(SrcLineData%LineWrOutput, kind=B8Ki)
+      LB(1:1) = lbound(SrcLineData%LineWrOutput)
+      UB(1:1) = ubound(SrcLineData%LineWrOutput)
       if (.not. allocated(DstLineData%LineWrOutput)) then
          allocate(DstLineData%LineWrOutput(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -1991,6 +2100,9 @@ subroutine MD_DestroyLine(LineData, ErrStat, ErrMsg)
    end if
    if (allocated(LineData%V)) then
       deallocate(LineData%V)
+   end if
+   if (allocated(LineData%F)) then
+      deallocate(LineData%F)
    end if
    if (allocated(LineData%U)) then
       deallocate(LineData%U)
@@ -2065,6 +2177,8 @@ subroutine MD_PackLine(RF, Indata)
    call RegPack(RF, InData%d)
    call RegPack(RF, InData%EA)
    call RegPack(RF, InData%EA_D)
+   call RegPack(RF, InData%alphaMBL)
+   call RegPack(RF, InData%vbeta)
    call RegPack(RF, InData%BA)
    call RegPack(RF, InData%BA_D)
    call RegPack(RF, InData%EI)
@@ -2093,6 +2207,7 @@ subroutine MD_PackLine(RF, Indata)
    call RegPackAlloc(RF, InData%Kurv)
    call RegPackAlloc(RF, InData%dl_1)
    call RegPackAlloc(RF, InData%V)
+   call RegPackAlloc(RF, InData%F)
    call RegPackAlloc(RF, InData%U)
    call RegPackAlloc(RF, InData%Ud)
    call RegPackAlloc(RF, InData%zeta)
@@ -2120,7 +2235,7 @@ subroutine MD_UnPackLine(RF, OutData)
    type(RegFile), intent(inout)    :: RF
    type(MD_Line), intent(inout) :: OutData
    character(*), parameter            :: RoutineName = 'MD_UnPackLine'
-   integer(B8Ki)   :: LB(3), UB(3)
+   integer(B4Ki)   :: LB(3), UB(3)
    integer(IntKi)  :: stat
    logical         :: IsAllocAssoc
    if (RF%ErrStat /= ErrID_None) return
@@ -2139,6 +2254,8 @@ subroutine MD_UnPackLine(RF, OutData)
    call RegUnpack(RF, OutData%d); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%EA); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%EA_D); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%alphaMBL); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%vbeta); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%BA); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%BA_D); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%EI); if (RegCheckErr(RF, RoutineName)) return
@@ -2167,6 +2284,7 @@ subroutine MD_UnPackLine(RF, OutData)
    call RegUnpackAlloc(RF, OutData%Kurv); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpackAlloc(RF, OutData%dl_1); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpackAlloc(RF, OutData%V); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpackAlloc(RF, OutData%F); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpackAlloc(RF, OutData%U); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpackAlloc(RF, OutData%Ud); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpackAlloc(RF, OutData%zeta); if (RegCheckErr(RF, RoutineName)) return
@@ -2187,6 +2305,56 @@ subroutine MD_UnPackLine(RF, OutData)
    call RegUnpack(RF, OutData%EndMomentB); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%LineUnOut); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpackAlloc(RF, OutData%LineWrOutput); if (RegCheckErr(RF, RoutineName)) return
+end subroutine
+
+subroutine MD_CopyExtLd(SrcExtLdData, DstExtLdData, CtrlCode, ErrStat, ErrMsg)
+   type(MD_ExtLd), intent(in) :: SrcExtLdData
+   type(MD_ExtLd), intent(inout) :: DstExtLdData
+   integer(IntKi),  intent(in   ) :: CtrlCode
+   integer(IntKi),  intent(  out) :: ErrStat
+   character(*),    intent(  out) :: ErrMsg
+   character(*), parameter        :: RoutineName = 'MD_CopyExtLd'
+   ErrStat = ErrID_None
+   ErrMsg  = ''
+   DstExtLdData%IdNum = SrcExtLdData%IdNum
+   DstExtLdData%Fext = SrcExtLdData%Fext
+   DstExtLdData%Blin = SrcExtLdData%Blin
+   DstExtLdData%Bquad = SrcExtLdData%Bquad
+   DstExtLdData%isGlobal = SrcExtLdData%isGlobal
+end subroutine
+
+subroutine MD_DestroyExtLd(ExtLdData, ErrStat, ErrMsg)
+   type(MD_ExtLd), intent(inout) :: ExtLdData
+   integer(IntKi),  intent(  out) :: ErrStat
+   character(*),    intent(  out) :: ErrMsg
+   character(*), parameter        :: RoutineName = 'MD_DestroyExtLd'
+   ErrStat = ErrID_None
+   ErrMsg  = ''
+end subroutine
+
+subroutine MD_PackExtLd(RF, Indata)
+   type(RegFile), intent(inout) :: RF
+   type(MD_ExtLd), intent(in) :: InData
+   character(*), parameter         :: RoutineName = 'MD_PackExtLd'
+   if (RF%ErrStat >= AbortErrLev) return
+   call RegPack(RF, InData%IdNum)
+   call RegPack(RF, InData%Fext)
+   call RegPack(RF, InData%Blin)
+   call RegPack(RF, InData%Bquad)
+   call RegPack(RF, InData%isGlobal)
+   if (RegCheckErr(RF, RoutineName)) return
+end subroutine
+
+subroutine MD_UnPackExtLd(RF, OutData)
+   type(RegFile), intent(inout)    :: RF
+   type(MD_ExtLd), intent(inout) :: OutData
+   character(*), parameter            :: RoutineName = 'MD_UnPackExtLd'
+   if (RF%ErrStat /= ErrID_None) return
+   call RegUnpack(RF, OutData%IdNum); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%Fext); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%Blin); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%Bquad); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%isGlobal); if (RegCheckErr(RF, RoutineName)) return
 end subroutine
 
 subroutine MD_CopyFail(SrcFailData, DstFailData, CtrlCode, ErrStat, ErrMsg)
@@ -2310,14 +2478,14 @@ subroutine MD_CopyVisDiam(SrcVisDiamData, DstVisDiamData, CtrlCode, ErrStat, Err
    integer(IntKi),  intent(in   ) :: CtrlCode
    integer(IntKi),  intent(  out) :: ErrStat
    character(*),    intent(  out) :: ErrMsg
-   integer(B8Ki)                  :: LB(1), UB(1)
+   integer(B4Ki)                  :: LB(1), UB(1)
    integer(IntKi)                 :: ErrStat2
    character(*), parameter        :: RoutineName = 'MD_CopyVisDiam'
    ErrStat = ErrID_None
    ErrMsg  = ''
    if (allocated(SrcVisDiamData%Diam)) then
-      LB(1:1) = lbound(SrcVisDiamData%Diam, kind=B8Ki)
-      UB(1:1) = ubound(SrcVisDiamData%Diam, kind=B8Ki)
+      LB(1:1) = lbound(SrcVisDiamData%Diam)
+      UB(1:1) = ubound(SrcVisDiamData%Diam)
       if (.not. allocated(DstVisDiamData%Diam)) then
          allocate(DstVisDiamData%Diam(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2354,7 +2522,7 @@ subroutine MD_UnPackVisDiam(RF, OutData)
    type(RegFile), intent(inout)    :: RF
    type(VisDiam), intent(inout) :: OutData
    character(*), parameter            :: RoutineName = 'MD_UnPackVisDiam'
-   integer(B8Ki)   :: LB(1), UB(1)
+   integer(B4Ki)   :: LB(1), UB(1)
    integer(IntKi)  :: stat
    logical         :: IsAllocAssoc
    if (RF%ErrStat /= ErrID_None) return
@@ -2367,15 +2535,15 @@ subroutine MD_CopyInitOutput(SrcInitOutputData, DstInitOutputData, CtrlCode, Err
    integer(IntKi),  intent(in   ) :: CtrlCode
    integer(IntKi),  intent(  out) :: ErrStat
    character(*),    intent(  out) :: ErrMsg
-   integer(B8Ki)                  :: LB(1), UB(1)
+   integer(B4Ki)                  :: LB(1), UB(1)
    integer(IntKi)                 :: ErrStat2
    character(ErrMsgLen)           :: ErrMsg2
    character(*), parameter        :: RoutineName = 'MD_CopyInitOutput'
    ErrStat = ErrID_None
    ErrMsg  = ''
    if (allocated(SrcInitOutputData%writeOutputHdr)) then
-      LB(1:1) = lbound(SrcInitOutputData%writeOutputHdr, kind=B8Ki)
-      UB(1:1) = ubound(SrcInitOutputData%writeOutputHdr, kind=B8Ki)
+      LB(1:1) = lbound(SrcInitOutputData%writeOutputHdr)
+      UB(1:1) = ubound(SrcInitOutputData%writeOutputHdr)
       if (.not. allocated(DstInitOutputData%writeOutputHdr)) then
          allocate(DstInitOutputData%writeOutputHdr(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2386,8 +2554,8 @@ subroutine MD_CopyInitOutput(SrcInitOutputData, DstInitOutputData, CtrlCode, Err
       DstInitOutputData%writeOutputHdr = SrcInitOutputData%writeOutputHdr
    end if
    if (allocated(SrcInitOutputData%writeOutputUnt)) then
-      LB(1:1) = lbound(SrcInitOutputData%writeOutputUnt, kind=B8Ki)
-      UB(1:1) = ubound(SrcInitOutputData%writeOutputUnt, kind=B8Ki)
+      LB(1:1) = lbound(SrcInitOutputData%writeOutputUnt)
+      UB(1:1) = ubound(SrcInitOutputData%writeOutputUnt)
       if (.not. allocated(DstInitOutputData%writeOutputUnt)) then
          allocate(DstInitOutputData%writeOutputUnt(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2401,8 +2569,8 @@ subroutine MD_CopyInitOutput(SrcInitOutputData, DstInitOutputData, CtrlCode, Err
    call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
    if (ErrStat >= AbortErrLev) return
    if (allocated(SrcInitOutputData%CableCChanRqst)) then
-      LB(1:1) = lbound(SrcInitOutputData%CableCChanRqst, kind=B8Ki)
-      UB(1:1) = ubound(SrcInitOutputData%CableCChanRqst, kind=B8Ki)
+      LB(1:1) = lbound(SrcInitOutputData%CableCChanRqst)
+      UB(1:1) = ubound(SrcInitOutputData%CableCChanRqst)
       if (.not. allocated(DstInitOutputData%CableCChanRqst)) then
          allocate(DstInitOutputData%CableCChanRqst(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2413,8 +2581,8 @@ subroutine MD_CopyInitOutput(SrcInitOutputData, DstInitOutputData, CtrlCode, Err
       DstInitOutputData%CableCChanRqst = SrcInitOutputData%CableCChanRqst
    end if
    if (allocated(SrcInitOutputData%LinNames_y)) then
-      LB(1:1) = lbound(SrcInitOutputData%LinNames_y, kind=B8Ki)
-      UB(1:1) = ubound(SrcInitOutputData%LinNames_y, kind=B8Ki)
+      LB(1:1) = lbound(SrcInitOutputData%LinNames_y)
+      UB(1:1) = ubound(SrcInitOutputData%LinNames_y)
       if (.not. allocated(DstInitOutputData%LinNames_y)) then
          allocate(DstInitOutputData%LinNames_y(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2425,8 +2593,8 @@ subroutine MD_CopyInitOutput(SrcInitOutputData, DstInitOutputData, CtrlCode, Err
       DstInitOutputData%LinNames_y = SrcInitOutputData%LinNames_y
    end if
    if (allocated(SrcInitOutputData%LinNames_x)) then
-      LB(1:1) = lbound(SrcInitOutputData%LinNames_x, kind=B8Ki)
-      UB(1:1) = ubound(SrcInitOutputData%LinNames_x, kind=B8Ki)
+      LB(1:1) = lbound(SrcInitOutputData%LinNames_x)
+      UB(1:1) = ubound(SrcInitOutputData%LinNames_x)
       if (.not. allocated(DstInitOutputData%LinNames_x)) then
          allocate(DstInitOutputData%LinNames_x(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2437,8 +2605,8 @@ subroutine MD_CopyInitOutput(SrcInitOutputData, DstInitOutputData, CtrlCode, Err
       DstInitOutputData%LinNames_x = SrcInitOutputData%LinNames_x
    end if
    if (allocated(SrcInitOutputData%LinNames_u)) then
-      LB(1:1) = lbound(SrcInitOutputData%LinNames_u, kind=B8Ki)
-      UB(1:1) = ubound(SrcInitOutputData%LinNames_u, kind=B8Ki)
+      LB(1:1) = lbound(SrcInitOutputData%LinNames_u)
+      UB(1:1) = ubound(SrcInitOutputData%LinNames_u)
       if (.not. allocated(DstInitOutputData%LinNames_u)) then
          allocate(DstInitOutputData%LinNames_u(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2449,8 +2617,8 @@ subroutine MD_CopyInitOutput(SrcInitOutputData, DstInitOutputData, CtrlCode, Err
       DstInitOutputData%LinNames_u = SrcInitOutputData%LinNames_u
    end if
    if (allocated(SrcInitOutputData%RotFrame_y)) then
-      LB(1:1) = lbound(SrcInitOutputData%RotFrame_y, kind=B8Ki)
-      UB(1:1) = ubound(SrcInitOutputData%RotFrame_y, kind=B8Ki)
+      LB(1:1) = lbound(SrcInitOutputData%RotFrame_y)
+      UB(1:1) = ubound(SrcInitOutputData%RotFrame_y)
       if (.not. allocated(DstInitOutputData%RotFrame_y)) then
          allocate(DstInitOutputData%RotFrame_y(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2461,8 +2629,8 @@ subroutine MD_CopyInitOutput(SrcInitOutputData, DstInitOutputData, CtrlCode, Err
       DstInitOutputData%RotFrame_y = SrcInitOutputData%RotFrame_y
    end if
    if (allocated(SrcInitOutputData%RotFrame_x)) then
-      LB(1:1) = lbound(SrcInitOutputData%RotFrame_x, kind=B8Ki)
-      UB(1:1) = ubound(SrcInitOutputData%RotFrame_x, kind=B8Ki)
+      LB(1:1) = lbound(SrcInitOutputData%RotFrame_x)
+      UB(1:1) = ubound(SrcInitOutputData%RotFrame_x)
       if (.not. allocated(DstInitOutputData%RotFrame_x)) then
          allocate(DstInitOutputData%RotFrame_x(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2473,8 +2641,8 @@ subroutine MD_CopyInitOutput(SrcInitOutputData, DstInitOutputData, CtrlCode, Err
       DstInitOutputData%RotFrame_x = SrcInitOutputData%RotFrame_x
    end if
    if (allocated(SrcInitOutputData%RotFrame_u)) then
-      LB(1:1) = lbound(SrcInitOutputData%RotFrame_u, kind=B8Ki)
-      UB(1:1) = ubound(SrcInitOutputData%RotFrame_u, kind=B8Ki)
+      LB(1:1) = lbound(SrcInitOutputData%RotFrame_u)
+      UB(1:1) = ubound(SrcInitOutputData%RotFrame_u)
       if (.not. allocated(DstInitOutputData%RotFrame_u)) then
          allocate(DstInitOutputData%RotFrame_u(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2485,8 +2653,8 @@ subroutine MD_CopyInitOutput(SrcInitOutputData, DstInitOutputData, CtrlCode, Err
       DstInitOutputData%RotFrame_u = SrcInitOutputData%RotFrame_u
    end if
    if (allocated(SrcInitOutputData%IsLoad_u)) then
-      LB(1:1) = lbound(SrcInitOutputData%IsLoad_u, kind=B8Ki)
-      UB(1:1) = ubound(SrcInitOutputData%IsLoad_u, kind=B8Ki)
+      LB(1:1) = lbound(SrcInitOutputData%IsLoad_u)
+      UB(1:1) = ubound(SrcInitOutputData%IsLoad_u)
       if (.not. allocated(DstInitOutputData%IsLoad_u)) then
          allocate(DstInitOutputData%IsLoad_u(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2497,8 +2665,8 @@ subroutine MD_CopyInitOutput(SrcInitOutputData, DstInitOutputData, CtrlCode, Err
       DstInitOutputData%IsLoad_u = SrcInitOutputData%IsLoad_u
    end if
    if (allocated(SrcInitOutputData%DerivOrder_x)) then
-      LB(1:1) = lbound(SrcInitOutputData%DerivOrder_x, kind=B8Ki)
-      UB(1:1) = ubound(SrcInitOutputData%DerivOrder_x, kind=B8Ki)
+      LB(1:1) = lbound(SrcInitOutputData%DerivOrder_x)
+      UB(1:1) = ubound(SrcInitOutputData%DerivOrder_x)
       if (.not. allocated(DstInitOutputData%DerivOrder_x)) then
          allocate(DstInitOutputData%DerivOrder_x(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2580,7 +2748,7 @@ subroutine MD_UnPackInitOutput(RF, OutData)
    type(RegFile), intent(inout)    :: RF
    type(MD_InitOutputType), intent(inout) :: OutData
    character(*), parameter            :: RoutineName = 'MD_UnPackInitOutput'
-   integer(B8Ki)   :: LB(1), UB(1)
+   integer(B4Ki)   :: LB(1), UB(1)
    integer(IntKi)  :: stat
    logical         :: IsAllocAssoc
    if (RF%ErrStat /= ErrID_None) return
@@ -2604,14 +2772,14 @@ subroutine MD_CopyContState(SrcContStateData, DstContStateData, CtrlCode, ErrSta
    integer(IntKi),  intent(in   ) :: CtrlCode
    integer(IntKi),  intent(  out) :: ErrStat
    character(*),    intent(  out) :: ErrMsg
-   integer(B8Ki)                  :: LB(1), UB(1)
+   integer(B4Ki)                  :: LB(1), UB(1)
    integer(IntKi)                 :: ErrStat2
    character(*), parameter        :: RoutineName = 'MD_CopyContState'
    ErrStat = ErrID_None
    ErrMsg  = ''
    if (allocated(SrcContStateData%states)) then
-      LB(1:1) = lbound(SrcContStateData%states, kind=B8Ki)
-      UB(1:1) = ubound(SrcContStateData%states, kind=B8Ki)
+      LB(1:1) = lbound(SrcContStateData%states)
+      UB(1:1) = ubound(SrcContStateData%states)
       if (.not. allocated(DstContStateData%states)) then
          allocate(DstContStateData%states(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2648,7 +2816,7 @@ subroutine MD_UnPackContState(RF, OutData)
    type(RegFile), intent(inout)    :: RF
    type(MD_ContinuousStateType), intent(inout) :: OutData
    character(*), parameter            :: RoutineName = 'MD_UnPackContState'
-   integer(B8Ki)   :: LB(1), UB(1)
+   integer(B4Ki)   :: LB(1), UB(1)
    integer(IntKi)  :: stat
    logical         :: IsAllocAssoc
    if (RF%ErrStat /= ErrID_None) return
@@ -2775,16 +2943,16 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
    integer(IntKi),  intent(in   ) :: CtrlCode
    integer(IntKi),  intent(  out) :: ErrStat
    character(*),    intent(  out) :: ErrMsg
-   integer(B8Ki)   :: i1, i2
-   integer(B8Ki)                  :: LB(2), UB(2)
+   integer(B4Ki)   :: i1, i2
+   integer(B4Ki)                  :: LB(2), UB(2)
    integer(IntKi)                 :: ErrStat2
    character(ErrMsgLen)           :: ErrMsg2
    character(*), parameter        :: RoutineName = 'MD_CopyMisc'
    ErrStat = ErrID_None
    ErrMsg  = ''
    if (allocated(SrcMiscData%LineTypeList)) then
-      LB(1:1) = lbound(SrcMiscData%LineTypeList, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%LineTypeList, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%LineTypeList)
+      UB(1:1) = ubound(SrcMiscData%LineTypeList)
       if (.not. allocated(DstMiscData%LineTypeList)) then
          allocate(DstMiscData%LineTypeList(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2799,8 +2967,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
       end do
    end if
    if (allocated(SrcMiscData%RodTypeList)) then
-      LB(1:1) = lbound(SrcMiscData%RodTypeList, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%RodTypeList, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%RodTypeList)
+      UB(1:1) = ubound(SrcMiscData%RodTypeList)
       if (.not. allocated(DstMiscData%RodTypeList)) then
          allocate(DstMiscData%RodTypeList(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2818,8 +2986,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
    call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
    if (ErrStat >= AbortErrLev) return
    if (allocated(SrcMiscData%BodyList)) then
-      LB(1:1) = lbound(SrcMiscData%BodyList, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%BodyList, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%BodyList)
+      UB(1:1) = ubound(SrcMiscData%BodyList)
       if (.not. allocated(DstMiscData%BodyList)) then
          allocate(DstMiscData%BodyList(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2834,8 +3002,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
       end do
    end if
    if (allocated(SrcMiscData%RodList)) then
-      LB(1:1) = lbound(SrcMiscData%RodList, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%RodList, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%RodList)
+      UB(1:1) = ubound(SrcMiscData%RodList)
       if (.not. allocated(DstMiscData%RodList)) then
          allocate(DstMiscData%RodList(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2850,8 +3018,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
       end do
    end if
    if (allocated(SrcMiscData%PointList)) then
-      LB(1:1) = lbound(SrcMiscData%PointList, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%PointList, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%PointList)
+      UB(1:1) = ubound(SrcMiscData%PointList)
       if (.not. allocated(DstMiscData%PointList)) then
          allocate(DstMiscData%PointList(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2866,8 +3034,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
       end do
    end if
    if (allocated(SrcMiscData%LineList)) then
-      LB(1:1) = lbound(SrcMiscData%LineList, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%LineList, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%LineList)
+      UB(1:1) = ubound(SrcMiscData%LineList)
       if (.not. allocated(DstMiscData%LineList)) then
          allocate(DstMiscData%LineList(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2881,9 +3049,25 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
          if (ErrStat >= AbortErrLev) return
       end do
    end if
+   if (allocated(SrcMiscData%ExtLdList)) then
+      LB(1:1) = lbound(SrcMiscData%ExtLdList)
+      UB(1:1) = ubound(SrcMiscData%ExtLdList)
+      if (.not. allocated(DstMiscData%ExtLdList)) then
+         allocate(DstMiscData%ExtLdList(LB(1):UB(1)), stat=ErrStat2)
+         if (ErrStat2 /= 0) then
+            call SetErrStat(ErrID_Fatal, 'Error allocating DstMiscData%ExtLdList.', ErrStat, ErrMsg, RoutineName)
+            return
+         end if
+      end if
+      do i1 = LB(1), UB(1)
+         call MD_CopyExtLd(SrcMiscData%ExtLdList(i1), DstMiscData%ExtLdList(i1), CtrlCode, ErrStat2, ErrMsg2)
+         call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
+         if (ErrStat >= AbortErrLev) return
+      end do
+   end if
    if (allocated(SrcMiscData%FailList)) then
-      LB(1:1) = lbound(SrcMiscData%FailList, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%FailList, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%FailList)
+      UB(1:1) = ubound(SrcMiscData%FailList)
       if (.not. allocated(DstMiscData%FailList)) then
          allocate(DstMiscData%FailList(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2898,8 +3082,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
       end do
    end if
    if (allocated(SrcMiscData%FreePointIs)) then
-      LB(1:1) = lbound(SrcMiscData%FreePointIs, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%FreePointIs, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%FreePointIs)
+      UB(1:1) = ubound(SrcMiscData%FreePointIs)
       if (.not. allocated(DstMiscData%FreePointIs)) then
          allocate(DstMiscData%FreePointIs(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2910,8 +3094,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
       DstMiscData%FreePointIs = SrcMiscData%FreePointIs
    end if
    if (allocated(SrcMiscData%CpldPointIs)) then
-      LB(1:2) = lbound(SrcMiscData%CpldPointIs, kind=B8Ki)
-      UB(1:2) = ubound(SrcMiscData%CpldPointIs, kind=B8Ki)
+      LB(1:2) = lbound(SrcMiscData%CpldPointIs)
+      UB(1:2) = ubound(SrcMiscData%CpldPointIs)
       if (.not. allocated(DstMiscData%CpldPointIs)) then
          allocate(DstMiscData%CpldPointIs(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2922,8 +3106,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
       DstMiscData%CpldPointIs = SrcMiscData%CpldPointIs
    end if
    if (allocated(SrcMiscData%FreeRodIs)) then
-      LB(1:1) = lbound(SrcMiscData%FreeRodIs, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%FreeRodIs, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%FreeRodIs)
+      UB(1:1) = ubound(SrcMiscData%FreeRodIs)
       if (.not. allocated(DstMiscData%FreeRodIs)) then
          allocate(DstMiscData%FreeRodIs(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2934,8 +3118,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
       DstMiscData%FreeRodIs = SrcMiscData%FreeRodIs
    end if
    if (allocated(SrcMiscData%CpldRodIs)) then
-      LB(1:2) = lbound(SrcMiscData%CpldRodIs, kind=B8Ki)
-      UB(1:2) = ubound(SrcMiscData%CpldRodIs, kind=B8Ki)
+      LB(1:2) = lbound(SrcMiscData%CpldRodIs)
+      UB(1:2) = ubound(SrcMiscData%CpldRodIs)
       if (.not. allocated(DstMiscData%CpldRodIs)) then
          allocate(DstMiscData%CpldRodIs(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2946,8 +3130,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
       DstMiscData%CpldRodIs = SrcMiscData%CpldRodIs
    end if
    if (allocated(SrcMiscData%FreeBodyIs)) then
-      LB(1:1) = lbound(SrcMiscData%FreeBodyIs, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%FreeBodyIs, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%FreeBodyIs)
+      UB(1:1) = ubound(SrcMiscData%FreeBodyIs)
       if (.not. allocated(DstMiscData%FreeBodyIs)) then
          allocate(DstMiscData%FreeBodyIs(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2958,8 +3142,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
       DstMiscData%FreeBodyIs = SrcMiscData%FreeBodyIs
    end if
    if (allocated(SrcMiscData%CpldBodyIs)) then
-      LB(1:2) = lbound(SrcMiscData%CpldBodyIs, kind=B8Ki)
-      UB(1:2) = ubound(SrcMiscData%CpldBodyIs, kind=B8Ki)
+      LB(1:2) = lbound(SrcMiscData%CpldBodyIs)
+      UB(1:2) = ubound(SrcMiscData%CpldBodyIs)
       if (.not. allocated(DstMiscData%CpldBodyIs)) then
          allocate(DstMiscData%CpldBodyIs(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2970,8 +3154,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
       DstMiscData%CpldBodyIs = SrcMiscData%CpldBodyIs
    end if
    if (allocated(SrcMiscData%LineStateIs1)) then
-      LB(1:1) = lbound(SrcMiscData%LineStateIs1, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%LineStateIs1, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%LineStateIs1)
+      UB(1:1) = ubound(SrcMiscData%LineStateIs1)
       if (.not. allocated(DstMiscData%LineStateIs1)) then
          allocate(DstMiscData%LineStateIs1(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2982,8 +3166,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
       DstMiscData%LineStateIs1 = SrcMiscData%LineStateIs1
    end if
    if (allocated(SrcMiscData%LineStateIsN)) then
-      LB(1:1) = lbound(SrcMiscData%LineStateIsN, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%LineStateIsN, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%LineStateIsN)
+      UB(1:1) = ubound(SrcMiscData%LineStateIsN)
       if (.not. allocated(DstMiscData%LineStateIsN)) then
          allocate(DstMiscData%LineStateIsN(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -2994,8 +3178,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
       DstMiscData%LineStateIsN = SrcMiscData%LineStateIsN
    end if
    if (allocated(SrcMiscData%PointStateIs1)) then
-      LB(1:1) = lbound(SrcMiscData%PointStateIs1, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%PointStateIs1, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%PointStateIs1)
+      UB(1:1) = ubound(SrcMiscData%PointStateIs1)
       if (.not. allocated(DstMiscData%PointStateIs1)) then
          allocate(DstMiscData%PointStateIs1(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3006,8 +3190,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
       DstMiscData%PointStateIs1 = SrcMiscData%PointStateIs1
    end if
    if (allocated(SrcMiscData%PointStateIsN)) then
-      LB(1:1) = lbound(SrcMiscData%PointStateIsN, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%PointStateIsN, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%PointStateIsN)
+      UB(1:1) = ubound(SrcMiscData%PointStateIsN)
       if (.not. allocated(DstMiscData%PointStateIsN)) then
          allocate(DstMiscData%PointStateIsN(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3018,8 +3202,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
       DstMiscData%PointStateIsN = SrcMiscData%PointStateIsN
    end if
    if (allocated(SrcMiscData%RodStateIs1)) then
-      LB(1:1) = lbound(SrcMiscData%RodStateIs1, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%RodStateIs1, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%RodStateIs1)
+      UB(1:1) = ubound(SrcMiscData%RodStateIs1)
       if (.not. allocated(DstMiscData%RodStateIs1)) then
          allocate(DstMiscData%RodStateIs1(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3030,8 +3214,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
       DstMiscData%RodStateIs1 = SrcMiscData%RodStateIs1
    end if
    if (allocated(SrcMiscData%RodStateIsN)) then
-      LB(1:1) = lbound(SrcMiscData%RodStateIsN, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%RodStateIsN, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%RodStateIsN)
+      UB(1:1) = ubound(SrcMiscData%RodStateIsN)
       if (.not. allocated(DstMiscData%RodStateIsN)) then
          allocate(DstMiscData%RodStateIsN(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3042,8 +3226,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
       DstMiscData%RodStateIsN = SrcMiscData%RodStateIsN
    end if
    if (allocated(SrcMiscData%BodyStateIs1)) then
-      LB(1:1) = lbound(SrcMiscData%BodyStateIs1, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%BodyStateIs1, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%BodyStateIs1)
+      UB(1:1) = ubound(SrcMiscData%BodyStateIs1)
       if (.not. allocated(DstMiscData%BodyStateIs1)) then
          allocate(DstMiscData%BodyStateIs1(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3054,8 +3238,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
       DstMiscData%BodyStateIs1 = SrcMiscData%BodyStateIs1
    end if
    if (allocated(SrcMiscData%BodyStateIsN)) then
-      LB(1:1) = lbound(SrcMiscData%BodyStateIsN, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%BodyStateIsN, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%BodyStateIsN)
+      UB(1:1) = ubound(SrcMiscData%BodyStateIsN)
       if (.not. allocated(DstMiscData%BodyStateIsN)) then
          allocate(DstMiscData%BodyStateIsN(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3076,8 +3260,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
    if (ErrStat >= AbortErrLev) return
    DstMiscData%zeros6 = SrcMiscData%zeros6
    if (allocated(SrcMiscData%MDWrOutput)) then
-      LB(1:1) = lbound(SrcMiscData%MDWrOutput, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%MDWrOutput, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%MDWrOutput)
+      UB(1:1) = ubound(SrcMiscData%MDWrOutput)
       if (.not. allocated(DstMiscData%MDWrOutput)) then
          allocate(DstMiscData%MDWrOutput(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3090,8 +3274,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
    DstMiscData%LastOutTime = SrcMiscData%LastOutTime
    DstMiscData%PtfmInit = SrcMiscData%PtfmInit
    if (allocated(SrcMiscData%BathymetryGrid)) then
-      LB(1:2) = lbound(SrcMiscData%BathymetryGrid, kind=B8Ki)
-      UB(1:2) = ubound(SrcMiscData%BathymetryGrid, kind=B8Ki)
+      LB(1:2) = lbound(SrcMiscData%BathymetryGrid)
+      UB(1:2) = ubound(SrcMiscData%BathymetryGrid)
       if (.not. allocated(DstMiscData%BathymetryGrid)) then
          allocate(DstMiscData%BathymetryGrid(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3102,8 +3286,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
       DstMiscData%BathymetryGrid = SrcMiscData%BathymetryGrid
    end if
    if (allocated(SrcMiscData%BathGrid_Xs)) then
-      LB(1:1) = lbound(SrcMiscData%BathGrid_Xs, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%BathGrid_Xs, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%BathGrid_Xs)
+      UB(1:1) = ubound(SrcMiscData%BathGrid_Xs)
       if (.not. allocated(DstMiscData%BathGrid_Xs)) then
          allocate(DstMiscData%BathGrid_Xs(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3114,8 +3298,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
       DstMiscData%BathGrid_Xs = SrcMiscData%BathGrid_Xs
    end if
    if (allocated(SrcMiscData%BathGrid_Ys)) then
-      LB(1:1) = lbound(SrcMiscData%BathGrid_Ys, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%BathGrid_Ys, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%BathGrid_Ys)
+      UB(1:1) = ubound(SrcMiscData%BathGrid_Ys)
       if (.not. allocated(DstMiscData%BathGrid_Ys)) then
          allocate(DstMiscData%BathGrid_Ys(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3126,8 +3310,8 @@ subroutine MD_CopyMisc(SrcMiscData, DstMiscData, CtrlCode, ErrStat, ErrMsg)
       DstMiscData%BathGrid_Ys = SrcMiscData%BathGrid_Ys
    end if
    if (allocated(SrcMiscData%BathGrid_npoints)) then
-      LB(1:1) = lbound(SrcMiscData%BathGrid_npoints, kind=B8Ki)
-      UB(1:1) = ubound(SrcMiscData%BathGrid_npoints, kind=B8Ki)
+      LB(1:1) = lbound(SrcMiscData%BathGrid_npoints)
+      UB(1:1) = ubound(SrcMiscData%BathGrid_npoints)
       if (.not. allocated(DstMiscData%BathGrid_npoints)) then
          allocate(DstMiscData%BathGrid_npoints(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3143,16 +3327,16 @@ subroutine MD_DestroyMisc(MiscData, ErrStat, ErrMsg)
    type(MD_MiscVarType), intent(inout) :: MiscData
    integer(IntKi),  intent(  out) :: ErrStat
    character(*),    intent(  out) :: ErrMsg
-   integer(B8Ki)   :: i1, i2
-   integer(B8Ki)   :: LB(2), UB(2)
+   integer(B4Ki)   :: i1, i2
+   integer(B4Ki)   :: LB(2), UB(2)
    integer(IntKi)                 :: ErrStat2
    character(ErrMsgLen)           :: ErrMsg2
    character(*), parameter        :: RoutineName = 'MD_DestroyMisc'
    ErrStat = ErrID_None
    ErrMsg  = ''
    if (allocated(MiscData%LineTypeList)) then
-      LB(1:1) = lbound(MiscData%LineTypeList, kind=B8Ki)
-      UB(1:1) = ubound(MiscData%LineTypeList, kind=B8Ki)
+      LB(1:1) = lbound(MiscData%LineTypeList)
+      UB(1:1) = ubound(MiscData%LineTypeList)
       do i1 = LB(1), UB(1)
          call MD_DestroyLineProp(MiscData%LineTypeList(i1), ErrStat2, ErrMsg2)
          call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
@@ -3160,8 +3344,8 @@ subroutine MD_DestroyMisc(MiscData, ErrStat, ErrMsg)
       deallocate(MiscData%LineTypeList)
    end if
    if (allocated(MiscData%RodTypeList)) then
-      LB(1:1) = lbound(MiscData%RodTypeList, kind=B8Ki)
-      UB(1:1) = ubound(MiscData%RodTypeList, kind=B8Ki)
+      LB(1:1) = lbound(MiscData%RodTypeList)
+      UB(1:1) = ubound(MiscData%RodTypeList)
       do i1 = LB(1), UB(1)
          call MD_DestroyRodProp(MiscData%RodTypeList(i1), ErrStat2, ErrMsg2)
          call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
@@ -3171,8 +3355,8 @@ subroutine MD_DestroyMisc(MiscData, ErrStat, ErrMsg)
    call MD_DestroyBody(MiscData%GroundBody, ErrStat2, ErrMsg2)
    call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
    if (allocated(MiscData%BodyList)) then
-      LB(1:1) = lbound(MiscData%BodyList, kind=B8Ki)
-      UB(1:1) = ubound(MiscData%BodyList, kind=B8Ki)
+      LB(1:1) = lbound(MiscData%BodyList)
+      UB(1:1) = ubound(MiscData%BodyList)
       do i1 = LB(1), UB(1)
          call MD_DestroyBody(MiscData%BodyList(i1), ErrStat2, ErrMsg2)
          call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
@@ -3180,8 +3364,8 @@ subroutine MD_DestroyMisc(MiscData, ErrStat, ErrMsg)
       deallocate(MiscData%BodyList)
    end if
    if (allocated(MiscData%RodList)) then
-      LB(1:1) = lbound(MiscData%RodList, kind=B8Ki)
-      UB(1:1) = ubound(MiscData%RodList, kind=B8Ki)
+      LB(1:1) = lbound(MiscData%RodList)
+      UB(1:1) = ubound(MiscData%RodList)
       do i1 = LB(1), UB(1)
          call MD_DestroyRod(MiscData%RodList(i1), ErrStat2, ErrMsg2)
          call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
@@ -3189,8 +3373,8 @@ subroutine MD_DestroyMisc(MiscData, ErrStat, ErrMsg)
       deallocate(MiscData%RodList)
    end if
    if (allocated(MiscData%PointList)) then
-      LB(1:1) = lbound(MiscData%PointList, kind=B8Ki)
-      UB(1:1) = ubound(MiscData%PointList, kind=B8Ki)
+      LB(1:1) = lbound(MiscData%PointList)
+      UB(1:1) = ubound(MiscData%PointList)
       do i1 = LB(1), UB(1)
          call MD_DestroyPoint(MiscData%PointList(i1), ErrStat2, ErrMsg2)
          call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
@@ -3198,17 +3382,26 @@ subroutine MD_DestroyMisc(MiscData, ErrStat, ErrMsg)
       deallocate(MiscData%PointList)
    end if
    if (allocated(MiscData%LineList)) then
-      LB(1:1) = lbound(MiscData%LineList, kind=B8Ki)
-      UB(1:1) = ubound(MiscData%LineList, kind=B8Ki)
+      LB(1:1) = lbound(MiscData%LineList)
+      UB(1:1) = ubound(MiscData%LineList)
       do i1 = LB(1), UB(1)
          call MD_DestroyLine(MiscData%LineList(i1), ErrStat2, ErrMsg2)
          call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
       end do
       deallocate(MiscData%LineList)
    end if
+   if (allocated(MiscData%ExtLdList)) then
+      LB(1:1) = lbound(MiscData%ExtLdList)
+      UB(1:1) = ubound(MiscData%ExtLdList)
+      do i1 = LB(1), UB(1)
+         call MD_DestroyExtLd(MiscData%ExtLdList(i1), ErrStat2, ErrMsg2)
+         call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
+      end do
+      deallocate(MiscData%ExtLdList)
+   end if
    if (allocated(MiscData%FailList)) then
-      LB(1:1) = lbound(MiscData%FailList, kind=B8Ki)
-      UB(1:1) = ubound(MiscData%FailList, kind=B8Ki)
+      LB(1:1) = lbound(MiscData%FailList)
+      UB(1:1) = ubound(MiscData%FailList)
       do i1 = LB(1), UB(1)
          call MD_DestroyFail(MiscData%FailList(i1), ErrStat2, ErrMsg2)
          call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
@@ -3282,23 +3475,23 @@ subroutine MD_PackMisc(RF, Indata)
    type(RegFile), intent(inout) :: RF
    type(MD_MiscVarType), intent(in) :: InData
    character(*), parameter         :: RoutineName = 'MD_PackMisc'
-   integer(B8Ki)   :: i1, i2
-   integer(B8Ki)   :: LB(2), UB(2)
+   integer(B4Ki)   :: i1, i2
+   integer(B4Ki)   :: LB(2), UB(2)
    if (RF%ErrStat >= AbortErrLev) return
    call RegPack(RF, allocated(InData%LineTypeList))
    if (allocated(InData%LineTypeList)) then
-      call RegPackBounds(RF, 1, lbound(InData%LineTypeList, kind=B8Ki), ubound(InData%LineTypeList, kind=B8Ki))
-      LB(1:1) = lbound(InData%LineTypeList, kind=B8Ki)
-      UB(1:1) = ubound(InData%LineTypeList, kind=B8Ki)
+      call RegPackBounds(RF, 1, lbound(InData%LineTypeList), ubound(InData%LineTypeList))
+      LB(1:1) = lbound(InData%LineTypeList)
+      UB(1:1) = ubound(InData%LineTypeList)
       do i1 = LB(1), UB(1)
          call MD_PackLineProp(RF, InData%LineTypeList(i1)) 
       end do
    end if
    call RegPack(RF, allocated(InData%RodTypeList))
    if (allocated(InData%RodTypeList)) then
-      call RegPackBounds(RF, 1, lbound(InData%RodTypeList, kind=B8Ki), ubound(InData%RodTypeList, kind=B8Ki))
-      LB(1:1) = lbound(InData%RodTypeList, kind=B8Ki)
-      UB(1:1) = ubound(InData%RodTypeList, kind=B8Ki)
+      call RegPackBounds(RF, 1, lbound(InData%RodTypeList), ubound(InData%RodTypeList))
+      LB(1:1) = lbound(InData%RodTypeList)
+      UB(1:1) = ubound(InData%RodTypeList)
       do i1 = LB(1), UB(1)
          call MD_PackRodProp(RF, InData%RodTypeList(i1)) 
       end do
@@ -3306,45 +3499,54 @@ subroutine MD_PackMisc(RF, Indata)
    call MD_PackBody(RF, InData%GroundBody) 
    call RegPack(RF, allocated(InData%BodyList))
    if (allocated(InData%BodyList)) then
-      call RegPackBounds(RF, 1, lbound(InData%BodyList, kind=B8Ki), ubound(InData%BodyList, kind=B8Ki))
-      LB(1:1) = lbound(InData%BodyList, kind=B8Ki)
-      UB(1:1) = ubound(InData%BodyList, kind=B8Ki)
+      call RegPackBounds(RF, 1, lbound(InData%BodyList), ubound(InData%BodyList))
+      LB(1:1) = lbound(InData%BodyList)
+      UB(1:1) = ubound(InData%BodyList)
       do i1 = LB(1), UB(1)
          call MD_PackBody(RF, InData%BodyList(i1)) 
       end do
    end if
    call RegPack(RF, allocated(InData%RodList))
    if (allocated(InData%RodList)) then
-      call RegPackBounds(RF, 1, lbound(InData%RodList, kind=B8Ki), ubound(InData%RodList, kind=B8Ki))
-      LB(1:1) = lbound(InData%RodList, kind=B8Ki)
-      UB(1:1) = ubound(InData%RodList, kind=B8Ki)
+      call RegPackBounds(RF, 1, lbound(InData%RodList), ubound(InData%RodList))
+      LB(1:1) = lbound(InData%RodList)
+      UB(1:1) = ubound(InData%RodList)
       do i1 = LB(1), UB(1)
          call MD_PackRod(RF, InData%RodList(i1)) 
       end do
    end if
    call RegPack(RF, allocated(InData%PointList))
    if (allocated(InData%PointList)) then
-      call RegPackBounds(RF, 1, lbound(InData%PointList, kind=B8Ki), ubound(InData%PointList, kind=B8Ki))
-      LB(1:1) = lbound(InData%PointList, kind=B8Ki)
-      UB(1:1) = ubound(InData%PointList, kind=B8Ki)
+      call RegPackBounds(RF, 1, lbound(InData%PointList), ubound(InData%PointList))
+      LB(1:1) = lbound(InData%PointList)
+      UB(1:1) = ubound(InData%PointList)
       do i1 = LB(1), UB(1)
          call MD_PackPoint(RF, InData%PointList(i1)) 
       end do
    end if
    call RegPack(RF, allocated(InData%LineList))
    if (allocated(InData%LineList)) then
-      call RegPackBounds(RF, 1, lbound(InData%LineList, kind=B8Ki), ubound(InData%LineList, kind=B8Ki))
-      LB(1:1) = lbound(InData%LineList, kind=B8Ki)
-      UB(1:1) = ubound(InData%LineList, kind=B8Ki)
+      call RegPackBounds(RF, 1, lbound(InData%LineList), ubound(InData%LineList))
+      LB(1:1) = lbound(InData%LineList)
+      UB(1:1) = ubound(InData%LineList)
       do i1 = LB(1), UB(1)
          call MD_PackLine(RF, InData%LineList(i1)) 
       end do
    end if
+   call RegPack(RF, allocated(InData%ExtLdList))
+   if (allocated(InData%ExtLdList)) then
+      call RegPackBounds(RF, 1, lbound(InData%ExtLdList), ubound(InData%ExtLdList))
+      LB(1:1) = lbound(InData%ExtLdList)
+      UB(1:1) = ubound(InData%ExtLdList)
+      do i1 = LB(1), UB(1)
+         call MD_PackExtLd(RF, InData%ExtLdList(i1)) 
+      end do
+   end if
    call RegPack(RF, allocated(InData%FailList))
    if (allocated(InData%FailList)) then
-      call RegPackBounds(RF, 1, lbound(InData%FailList, kind=B8Ki), ubound(InData%FailList, kind=B8Ki))
-      LB(1:1) = lbound(InData%FailList, kind=B8Ki)
-      UB(1:1) = ubound(InData%FailList, kind=B8Ki)
+      call RegPackBounds(RF, 1, lbound(InData%FailList), ubound(InData%FailList))
+      LB(1:1) = lbound(InData%FailList)
+      UB(1:1) = ubound(InData%FailList)
       do i1 = LB(1), UB(1)
          call MD_PackFail(RF, InData%FailList(i1)) 
       end do
@@ -3383,8 +3585,8 @@ subroutine MD_UnPackMisc(RF, OutData)
    type(RegFile), intent(inout)    :: RF
    type(MD_MiscVarType), intent(inout) :: OutData
    character(*), parameter            :: RoutineName = 'MD_UnPackMisc'
-   integer(B8Ki)   :: i1, i2
-   integer(B8Ki)   :: LB(2), UB(2)
+   integer(B4Ki)   :: i1, i2
+   integer(B4Ki)   :: LB(2), UB(2)
    integer(IntKi)  :: stat
    logical         :: IsAllocAssoc
    if (RF%ErrStat /= ErrID_None) return
@@ -3467,6 +3669,19 @@ subroutine MD_UnPackMisc(RF, OutData)
          call MD_UnpackLine(RF, OutData%LineList(i1)) ! LineList 
       end do
    end if
+   if (allocated(OutData%ExtLdList)) deallocate(OutData%ExtLdList)
+   call RegUnpack(RF, IsAllocAssoc); if (RegCheckErr(RF, RoutineName)) return
+   if (IsAllocAssoc) then
+      call RegUnpackBounds(RF, 1, LB, UB); if (RegCheckErr(RF, RoutineName)) return
+      allocate(OutData%ExtLdList(LB(1):UB(1)),stat=stat)
+      if (stat /= 0) then 
+         call SetErrStat(ErrID_Fatal, 'Error allocating OutData%ExtLdList.', RF%ErrStat, RF%ErrMsg, RoutineName)
+         return
+      end if
+      do i1 = LB(1), UB(1)
+         call MD_UnpackExtLd(RF, OutData%ExtLdList(i1)) ! ExtLdList 
+      end do
+   end if
    if (allocated(OutData%FailList)) deallocate(OutData%FailList)
    call RegUnpack(RF, IsAllocAssoc); if (RegCheckErr(RF, RoutineName)) return
    if (IsAllocAssoc) then
@@ -3515,8 +3730,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
    integer(IntKi),  intent(in   ) :: CtrlCode
    integer(IntKi),  intent(  out) :: ErrStat
    character(*),    intent(  out) :: ErrMsg
-   integer(B8Ki)   :: i1, i2, i3, i4
-   integer(B8Ki)                  :: LB(4), UB(4)
+   integer(B4Ki)   :: i1, i2, i3, i4
+   integer(B4Ki)                  :: LB(4), UB(4)
    integer(IntKi)                 :: ErrStat2
    character(ErrMsgLen)           :: ErrMsg2
    character(*), parameter        :: RoutineName = 'MD_CopyParam'
@@ -3529,14 +3744,15 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
    DstParamData%nBodies = SrcParamData%nBodies
    DstParamData%nRods = SrcParamData%nRods
    DstParamData%nLines = SrcParamData%nLines
+   DstParamData%nExtLds = SrcParamData%nExtLds
    DstParamData%nCtrlChans = SrcParamData%nCtrlChans
    DstParamData%nFails = SrcParamData%nFails
    DstParamData%nFreeBodies = SrcParamData%nFreeBodies
    DstParamData%nFreeRods = SrcParamData%nFreeRods
    DstParamData%nFreePoints = SrcParamData%nFreePoints
    if (allocated(SrcParamData%nCpldBodies)) then
-      LB(1:1) = lbound(SrcParamData%nCpldBodies, kind=B8Ki)
-      UB(1:1) = ubound(SrcParamData%nCpldBodies, kind=B8Ki)
+      LB(1:1) = lbound(SrcParamData%nCpldBodies)
+      UB(1:1) = ubound(SrcParamData%nCpldBodies)
       if (.not. allocated(DstParamData%nCpldBodies)) then
          allocate(DstParamData%nCpldBodies(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3547,8 +3763,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
       DstParamData%nCpldBodies = SrcParamData%nCpldBodies
    end if
    if (allocated(SrcParamData%nCpldRods)) then
-      LB(1:1) = lbound(SrcParamData%nCpldRods, kind=B8Ki)
-      UB(1:1) = ubound(SrcParamData%nCpldRods, kind=B8Ki)
+      LB(1:1) = lbound(SrcParamData%nCpldRods)
+      UB(1:1) = ubound(SrcParamData%nCpldRods)
       if (.not. allocated(DstParamData%nCpldRods)) then
          allocate(DstParamData%nCpldRods(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3559,8 +3775,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
       DstParamData%nCpldRods = SrcParamData%nCpldRods
    end if
    if (allocated(SrcParamData%nCpldPoints)) then
-      LB(1:1) = lbound(SrcParamData%nCpldPoints, kind=B8Ki)
-      UB(1:1) = ubound(SrcParamData%nCpldPoints, kind=B8Ki)
+      LB(1:1) = lbound(SrcParamData%nCpldPoints)
+      UB(1:1) = ubound(SrcParamData%nCpldPoints)
       if (.not. allocated(DstParamData%nCpldPoints)) then
          allocate(DstParamData%nCpldPoints(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3584,8 +3800,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
    DstParamData%dtOut = SrcParamData%dtOut
    DstParamData%RootName = SrcParamData%RootName
    if (allocated(SrcParamData%OutParam)) then
-      LB(1:1) = lbound(SrcParamData%OutParam, kind=B8Ki)
-      UB(1:1) = ubound(SrcParamData%OutParam, kind=B8Ki)
+      LB(1:1) = lbound(SrcParamData%OutParam)
+      UB(1:1) = ubound(SrcParamData%OutParam)
       if (.not. allocated(DstParamData%OutParam)) then
          allocate(DstParamData%OutParam(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3608,8 +3824,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
    DstParamData%Current = SrcParamData%Current
    DstParamData%nTurbines = SrcParamData%nTurbines
    if (allocated(SrcParamData%TurbineRefPos)) then
-      LB(1:2) = lbound(SrcParamData%TurbineRefPos, kind=B8Ki)
-      UB(1:2) = ubound(SrcParamData%TurbineRefPos, kind=B8Ki)
+      LB(1:2) = lbound(SrcParamData%TurbineRefPos)
+      UB(1:2) = ubound(SrcParamData%TurbineRefPos)
       if (.not. allocated(DstParamData%TurbineRefPos)) then
          allocate(DstParamData%TurbineRefPos(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3625,13 +3841,14 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
    DstParamData%cv = SrcParamData%cv
    DstParamData%inertialF = SrcParamData%inertialF
    DstParamData%inertialF_rampT = SrcParamData%inertialF_rampT
+   DstParamData%OutSwitch = SrcParamData%OutSwitch
    DstParamData%nxWave = SrcParamData%nxWave
    DstParamData%nyWave = SrcParamData%nyWave
    DstParamData%nzWave = SrcParamData%nzWave
    DstParamData%ntWave = SrcParamData%ntWave
    if (allocated(SrcParamData%pxWave)) then
-      LB(1:1) = lbound(SrcParamData%pxWave, kind=B8Ki)
-      UB(1:1) = ubound(SrcParamData%pxWave, kind=B8Ki)
+      LB(1:1) = lbound(SrcParamData%pxWave)
+      UB(1:1) = ubound(SrcParamData%pxWave)
       if (.not. allocated(DstParamData%pxWave)) then
          allocate(DstParamData%pxWave(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3642,8 +3859,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
       DstParamData%pxWave = SrcParamData%pxWave
    end if
    if (allocated(SrcParamData%pyWave)) then
-      LB(1:1) = lbound(SrcParamData%pyWave, kind=B8Ki)
-      UB(1:1) = ubound(SrcParamData%pyWave, kind=B8Ki)
+      LB(1:1) = lbound(SrcParamData%pyWave)
+      UB(1:1) = ubound(SrcParamData%pyWave)
       if (.not. allocated(DstParamData%pyWave)) then
          allocate(DstParamData%pyWave(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3654,8 +3871,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
       DstParamData%pyWave = SrcParamData%pyWave
    end if
    if (allocated(SrcParamData%pzWave)) then
-      LB(1:1) = lbound(SrcParamData%pzWave, kind=B8Ki)
-      UB(1:1) = ubound(SrcParamData%pzWave, kind=B8Ki)
+      LB(1:1) = lbound(SrcParamData%pzWave)
+      UB(1:1) = ubound(SrcParamData%pzWave)
       if (.not. allocated(DstParamData%pzWave)) then
          allocate(DstParamData%pzWave(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3667,8 +3884,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
    end if
    DstParamData%dtWave = SrcParamData%dtWave
    if (allocated(SrcParamData%uxWave)) then
-      LB(1:4) = lbound(SrcParamData%uxWave, kind=B8Ki)
-      UB(1:4) = ubound(SrcParamData%uxWave, kind=B8Ki)
+      LB(1:4) = lbound(SrcParamData%uxWave)
+      UB(1:4) = ubound(SrcParamData%uxWave)
       if (.not. allocated(DstParamData%uxWave)) then
          allocate(DstParamData%uxWave(LB(1):UB(1),LB(2):UB(2),LB(3):UB(3),LB(4):UB(4)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3679,8 +3896,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
       DstParamData%uxWave = SrcParamData%uxWave
    end if
    if (allocated(SrcParamData%uyWave)) then
-      LB(1:4) = lbound(SrcParamData%uyWave, kind=B8Ki)
-      UB(1:4) = ubound(SrcParamData%uyWave, kind=B8Ki)
+      LB(1:4) = lbound(SrcParamData%uyWave)
+      UB(1:4) = ubound(SrcParamData%uyWave)
       if (.not. allocated(DstParamData%uyWave)) then
          allocate(DstParamData%uyWave(LB(1):UB(1),LB(2):UB(2),LB(3):UB(3),LB(4):UB(4)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3691,8 +3908,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
       DstParamData%uyWave = SrcParamData%uyWave
    end if
    if (allocated(SrcParamData%uzWave)) then
-      LB(1:4) = lbound(SrcParamData%uzWave, kind=B8Ki)
-      UB(1:4) = ubound(SrcParamData%uzWave, kind=B8Ki)
+      LB(1:4) = lbound(SrcParamData%uzWave)
+      UB(1:4) = ubound(SrcParamData%uzWave)
       if (.not. allocated(DstParamData%uzWave)) then
          allocate(DstParamData%uzWave(LB(1):UB(1),LB(2):UB(2),LB(3):UB(3),LB(4):UB(4)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3703,8 +3920,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
       DstParamData%uzWave = SrcParamData%uzWave
    end if
    if (allocated(SrcParamData%axWave)) then
-      LB(1:4) = lbound(SrcParamData%axWave, kind=B8Ki)
-      UB(1:4) = ubound(SrcParamData%axWave, kind=B8Ki)
+      LB(1:4) = lbound(SrcParamData%axWave)
+      UB(1:4) = ubound(SrcParamData%axWave)
       if (.not. allocated(DstParamData%axWave)) then
          allocate(DstParamData%axWave(LB(1):UB(1),LB(2):UB(2),LB(3):UB(3),LB(4):UB(4)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3715,8 +3932,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
       DstParamData%axWave = SrcParamData%axWave
    end if
    if (allocated(SrcParamData%ayWave)) then
-      LB(1:4) = lbound(SrcParamData%ayWave, kind=B8Ki)
-      UB(1:4) = ubound(SrcParamData%ayWave, kind=B8Ki)
+      LB(1:4) = lbound(SrcParamData%ayWave)
+      UB(1:4) = ubound(SrcParamData%ayWave)
       if (.not. allocated(DstParamData%ayWave)) then
          allocate(DstParamData%ayWave(LB(1):UB(1),LB(2):UB(2),LB(3):UB(3),LB(4):UB(4)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3727,8 +3944,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
       DstParamData%ayWave = SrcParamData%ayWave
    end if
    if (allocated(SrcParamData%azWave)) then
-      LB(1:4) = lbound(SrcParamData%azWave, kind=B8Ki)
-      UB(1:4) = ubound(SrcParamData%azWave, kind=B8Ki)
+      LB(1:4) = lbound(SrcParamData%azWave)
+      UB(1:4) = ubound(SrcParamData%azWave)
       if (.not. allocated(DstParamData%azWave)) then
          allocate(DstParamData%azWave(LB(1):UB(1),LB(2):UB(2),LB(3):UB(3),LB(4):UB(4)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3739,8 +3956,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
       DstParamData%azWave = SrcParamData%azWave
    end if
    if (allocated(SrcParamData%PDyn)) then
-      LB(1:4) = lbound(SrcParamData%PDyn, kind=B8Ki)
-      UB(1:4) = ubound(SrcParamData%PDyn, kind=B8Ki)
+      LB(1:4) = lbound(SrcParamData%PDyn)
+      UB(1:4) = ubound(SrcParamData%PDyn)
       if (.not. allocated(DstParamData%PDyn)) then
          allocate(DstParamData%PDyn(LB(1):UB(1),LB(2):UB(2),LB(3):UB(3),LB(4):UB(4)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3751,8 +3968,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
       DstParamData%PDyn = SrcParamData%PDyn
    end if
    if (allocated(SrcParamData%zeta)) then
-      LB(1:3) = lbound(SrcParamData%zeta, kind=B8Ki)
-      UB(1:3) = ubound(SrcParamData%zeta, kind=B8Ki)
+      LB(1:3) = lbound(SrcParamData%zeta)
+      UB(1:3) = ubound(SrcParamData%zeta)
       if (.not. allocated(DstParamData%zeta)) then
          allocate(DstParamData%zeta(LB(1):UB(1),LB(2):UB(2),LB(3):UB(3)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3764,8 +3981,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
    end if
    DstParamData%nzCurrent = SrcParamData%nzCurrent
    if (allocated(SrcParamData%pzCurrent)) then
-      LB(1:1) = lbound(SrcParamData%pzCurrent, kind=B8Ki)
-      UB(1:1) = ubound(SrcParamData%pzCurrent, kind=B8Ki)
+      LB(1:1) = lbound(SrcParamData%pzCurrent)
+      UB(1:1) = ubound(SrcParamData%pzCurrent)
       if (.not. allocated(DstParamData%pzCurrent)) then
          allocate(DstParamData%pzCurrent(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3776,8 +3993,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
       DstParamData%pzCurrent = SrcParamData%pzCurrent
    end if
    if (allocated(SrcParamData%uxCurrent)) then
-      LB(1:1) = lbound(SrcParamData%uxCurrent, kind=B8Ki)
-      UB(1:1) = ubound(SrcParamData%uxCurrent, kind=B8Ki)
+      LB(1:1) = lbound(SrcParamData%uxCurrent)
+      UB(1:1) = ubound(SrcParamData%uxCurrent)
       if (.not. allocated(DstParamData%uxCurrent)) then
          allocate(DstParamData%uxCurrent(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3788,8 +4005,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
       DstParamData%uxCurrent = SrcParamData%uxCurrent
    end if
    if (allocated(SrcParamData%uyCurrent)) then
-      LB(1:1) = lbound(SrcParamData%uyCurrent, kind=B8Ki)
-      UB(1:1) = ubound(SrcParamData%uyCurrent, kind=B8Ki)
+      LB(1:1) = lbound(SrcParamData%uyCurrent)
+      UB(1:1) = ubound(SrcParamData%uyCurrent)
       if (.not. allocated(DstParamData%uyCurrent)) then
          allocate(DstParamData%uyCurrent(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3801,8 +4018,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
    end if
    DstParamData%Nx0 = SrcParamData%Nx0
    if (allocated(SrcParamData%Jac_u_indx)) then
-      LB(1:2) = lbound(SrcParamData%Jac_u_indx, kind=B8Ki)
-      UB(1:2) = ubound(SrcParamData%Jac_u_indx, kind=B8Ki)
+      LB(1:2) = lbound(SrcParamData%Jac_u_indx)
+      UB(1:2) = ubound(SrcParamData%Jac_u_indx)
       if (.not. allocated(DstParamData%Jac_u_indx)) then
          allocate(DstParamData%Jac_u_indx(LB(1):UB(1),LB(2):UB(2)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3813,8 +4030,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
       DstParamData%Jac_u_indx = SrcParamData%Jac_u_indx
    end if
    if (allocated(SrcParamData%du)) then
-      LB(1:1) = lbound(SrcParamData%du, kind=B8Ki)
-      UB(1:1) = ubound(SrcParamData%du, kind=B8Ki)
+      LB(1:1) = lbound(SrcParamData%du)
+      UB(1:1) = ubound(SrcParamData%du)
       if (.not. allocated(DstParamData%du)) then
          allocate(DstParamData%du(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3825,8 +4042,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
       DstParamData%du = SrcParamData%du
    end if
    if (allocated(SrcParamData%dx)) then
-      LB(1:1) = lbound(SrcParamData%dx, kind=B8Ki)
-      UB(1:1) = ubound(SrcParamData%dx, kind=B8Ki)
+      LB(1:1) = lbound(SrcParamData%dx)
+      UB(1:1) = ubound(SrcParamData%dx)
       if (.not. allocated(DstParamData%dx)) then
          allocate(DstParamData%dx(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3839,8 +4056,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
    DstParamData%Jac_ny = SrcParamData%Jac_ny
    DstParamData%Jac_nx = SrcParamData%Jac_nx
    if (allocated(SrcParamData%dxIdx_map2_xStateIdx)) then
-      LB(1:1) = lbound(SrcParamData%dxIdx_map2_xStateIdx, kind=B8Ki)
-      UB(1:1) = ubound(SrcParamData%dxIdx_map2_xStateIdx, kind=B8Ki)
+      LB(1:1) = lbound(SrcParamData%dxIdx_map2_xStateIdx)
+      UB(1:1) = ubound(SrcParamData%dxIdx_map2_xStateIdx)
       if (.not. allocated(DstParamData%dxIdx_map2_xStateIdx)) then
          allocate(DstParamData%dxIdx_map2_xStateIdx(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3852,8 +4069,8 @@ subroutine MD_CopyParam(SrcParamData, DstParamData, CtrlCode, ErrStat, ErrMsg)
    end if
    DstParamData%VisMeshes = SrcParamData%VisMeshes
    if (allocated(SrcParamData%VisRodsDiam)) then
-      LB(1:1) = lbound(SrcParamData%VisRodsDiam, kind=B8Ki)
-      UB(1:1) = ubound(SrcParamData%VisRodsDiam, kind=B8Ki)
+      LB(1:1) = lbound(SrcParamData%VisRodsDiam)
+      UB(1:1) = ubound(SrcParamData%VisRodsDiam)
       if (.not. allocated(DstParamData%VisRodsDiam)) then
          allocate(DstParamData%VisRodsDiam(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -3873,8 +4090,8 @@ subroutine MD_DestroyParam(ParamData, ErrStat, ErrMsg)
    type(MD_ParameterType), intent(inout) :: ParamData
    integer(IntKi),  intent(  out) :: ErrStat
    character(*),    intent(  out) :: ErrMsg
-   integer(B8Ki)   :: i1, i2, i3, i4
-   integer(B8Ki)   :: LB(4), UB(4)
+   integer(B4Ki)   :: i1, i2, i3, i4
+   integer(B4Ki)   :: LB(4), UB(4)
    integer(IntKi)                 :: ErrStat2
    character(ErrMsgLen)           :: ErrMsg2
    character(*), parameter        :: RoutineName = 'MD_DestroyParam'
@@ -3890,8 +4107,8 @@ subroutine MD_DestroyParam(ParamData, ErrStat, ErrMsg)
       deallocate(ParamData%nCpldPoints)
    end if
    if (allocated(ParamData%OutParam)) then
-      LB(1:1) = lbound(ParamData%OutParam, kind=B8Ki)
-      UB(1:1) = ubound(ParamData%OutParam, kind=B8Ki)
+      LB(1:1) = lbound(ParamData%OutParam)
+      UB(1:1) = ubound(ParamData%OutParam)
       do i1 = LB(1), UB(1)
          call MD_DestroyOutParmType(ParamData%OutParam(i1), ErrStat2, ErrMsg2)
          call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
@@ -3956,8 +4173,8 @@ subroutine MD_DestroyParam(ParamData, ErrStat, ErrMsg)
       deallocate(ParamData%dxIdx_map2_xStateIdx)
    end if
    if (allocated(ParamData%VisRodsDiam)) then
-      LB(1:1) = lbound(ParamData%VisRodsDiam, kind=B8Ki)
-      UB(1:1) = ubound(ParamData%VisRodsDiam, kind=B8Ki)
+      LB(1:1) = lbound(ParamData%VisRodsDiam)
+      UB(1:1) = ubound(ParamData%VisRodsDiam)
       do i1 = LB(1), UB(1)
          call MD_DestroyVisDiam(ParamData%VisRodsDiam(i1), ErrStat2, ErrMsg2)
          call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
@@ -3970,8 +4187,8 @@ subroutine MD_PackParam(RF, Indata)
    type(RegFile), intent(inout) :: RF
    type(MD_ParameterType), intent(in) :: InData
    character(*), parameter         :: RoutineName = 'MD_PackParam'
-   integer(B8Ki)   :: i1, i2, i3, i4
-   integer(B8Ki)   :: LB(4), UB(4)
+   integer(B4Ki)   :: i1, i2, i3, i4
+   integer(B4Ki)   :: LB(4), UB(4)
    if (RF%ErrStat >= AbortErrLev) return
    call RegPack(RF, InData%nLineTypes)
    call RegPack(RF, InData%nRodTypes)
@@ -3980,6 +4197,7 @@ subroutine MD_PackParam(RF, Indata)
    call RegPack(RF, InData%nBodies)
    call RegPack(RF, InData%nRods)
    call RegPack(RF, InData%nLines)
+   call RegPack(RF, InData%nExtLds)
    call RegPack(RF, InData%nCtrlChans)
    call RegPack(RF, InData%nFails)
    call RegPack(RF, InData%nFreeBodies)
@@ -4003,9 +4221,9 @@ subroutine MD_PackParam(RF, Indata)
    call RegPack(RF, InData%RootName)
    call RegPack(RF, allocated(InData%OutParam))
    if (allocated(InData%OutParam)) then
-      call RegPackBounds(RF, 1, lbound(InData%OutParam, kind=B8Ki), ubound(InData%OutParam, kind=B8Ki))
-      LB(1:1) = lbound(InData%OutParam, kind=B8Ki)
-      UB(1:1) = ubound(InData%OutParam, kind=B8Ki)
+      call RegPackBounds(RF, 1, lbound(InData%OutParam), ubound(InData%OutParam))
+      LB(1:1) = lbound(InData%OutParam)
+      UB(1:1) = ubound(InData%OutParam)
       do i1 = LB(1), UB(1)
          call MD_PackOutParmType(RF, InData%OutParam(i1)) 
       end do
@@ -4025,6 +4243,7 @@ subroutine MD_PackParam(RF, Indata)
    call RegPack(RF, InData%cv)
    call RegPack(RF, InData%inertialF)
    call RegPack(RF, InData%inertialF_rampT)
+   call RegPack(RF, InData%OutSwitch)
    call RegPack(RF, InData%nxWave)
    call RegPack(RF, InData%nyWave)
    call RegPack(RF, InData%nzWave)
@@ -4055,9 +4274,9 @@ subroutine MD_PackParam(RF, Indata)
    call RegPack(RF, InData%VisMeshes)
    call RegPack(RF, allocated(InData%VisRodsDiam))
    if (allocated(InData%VisRodsDiam)) then
-      call RegPackBounds(RF, 1, lbound(InData%VisRodsDiam, kind=B8Ki), ubound(InData%VisRodsDiam, kind=B8Ki))
-      LB(1:1) = lbound(InData%VisRodsDiam, kind=B8Ki)
-      UB(1:1) = ubound(InData%VisRodsDiam, kind=B8Ki)
+      call RegPackBounds(RF, 1, lbound(InData%VisRodsDiam), ubound(InData%VisRodsDiam))
+      LB(1:1) = lbound(InData%VisRodsDiam)
+      UB(1:1) = ubound(InData%VisRodsDiam)
       do i1 = LB(1), UB(1)
          call MD_PackVisDiam(RF, InData%VisRodsDiam(i1)) 
       end do
@@ -4069,8 +4288,8 @@ subroutine MD_UnPackParam(RF, OutData)
    type(RegFile), intent(inout)    :: RF
    type(MD_ParameterType), intent(inout) :: OutData
    character(*), parameter            :: RoutineName = 'MD_UnPackParam'
-   integer(B8Ki)   :: i1, i2, i3, i4
-   integer(B8Ki)   :: LB(4), UB(4)
+   integer(B4Ki)   :: i1, i2, i3, i4
+   integer(B4Ki)   :: LB(4), UB(4)
    integer(IntKi)  :: stat
    logical         :: IsAllocAssoc
    if (RF%ErrStat /= ErrID_None) return
@@ -4081,6 +4300,7 @@ subroutine MD_UnPackParam(RF, OutData)
    call RegUnpack(RF, OutData%nBodies); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%nRods); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%nLines); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%nExtLds); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%nCtrlChans); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%nFails); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%nFreeBodies); if (RegCheckErr(RF, RoutineName)) return
@@ -4130,6 +4350,7 @@ subroutine MD_UnPackParam(RF, OutData)
    call RegUnpack(RF, OutData%cv); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%inertialF); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%inertialF_rampT); if (RegCheckErr(RF, RoutineName)) return
+   call RegUnpack(RF, OutData%OutSwitch); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%nxWave); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%nyWave); if (RegCheckErr(RF, RoutineName)) return
    call RegUnpack(RF, OutData%nzWave); if (RegCheckErr(RF, RoutineName)) return
@@ -4179,16 +4400,16 @@ subroutine MD_CopyInput(SrcInputData, DstInputData, CtrlCode, ErrStat, ErrMsg)
    integer(IntKi),  intent(in   ) :: CtrlCode
    integer(IntKi),  intent(  out) :: ErrStat
    character(*),    intent(  out) :: ErrMsg
-   integer(B8Ki)   :: i1
-   integer(B8Ki)                  :: LB(1), UB(1)
+   integer(B4Ki)   :: i1
+   integer(B4Ki)                  :: LB(1), UB(1)
    integer(IntKi)                 :: ErrStat2
    character(ErrMsgLen)           :: ErrMsg2
    character(*), parameter        :: RoutineName = 'MD_CopyInput'
    ErrStat = ErrID_None
    ErrMsg  = ''
    if (allocated(SrcInputData%CoupledKinematics)) then
-      LB(1:1) = lbound(SrcInputData%CoupledKinematics, kind=B8Ki)
-      UB(1:1) = ubound(SrcInputData%CoupledKinematics, kind=B8Ki)
+      LB(1:1) = lbound(SrcInputData%CoupledKinematics)
+      UB(1:1) = ubound(SrcInputData%CoupledKinematics)
       if (.not. allocated(DstInputData%CoupledKinematics)) then
          allocate(DstInputData%CoupledKinematics(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -4203,8 +4424,8 @@ subroutine MD_CopyInput(SrcInputData, DstInputData, CtrlCode, ErrStat, ErrMsg)
       end do
    end if
    if (allocated(SrcInputData%DeltaL)) then
-      LB(1:1) = lbound(SrcInputData%DeltaL, kind=B8Ki)
-      UB(1:1) = ubound(SrcInputData%DeltaL, kind=B8Ki)
+      LB(1:1) = lbound(SrcInputData%DeltaL)
+      UB(1:1) = ubound(SrcInputData%DeltaL)
       if (.not. allocated(DstInputData%DeltaL)) then
          allocate(DstInputData%DeltaL(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -4215,8 +4436,8 @@ subroutine MD_CopyInput(SrcInputData, DstInputData, CtrlCode, ErrStat, ErrMsg)
       DstInputData%DeltaL = SrcInputData%DeltaL
    end if
    if (allocated(SrcInputData%DeltaLdot)) then
-      LB(1:1) = lbound(SrcInputData%DeltaLdot, kind=B8Ki)
-      UB(1:1) = ubound(SrcInputData%DeltaLdot, kind=B8Ki)
+      LB(1:1) = lbound(SrcInputData%DeltaLdot)
+      UB(1:1) = ubound(SrcInputData%DeltaLdot)
       if (.not. allocated(DstInputData%DeltaLdot)) then
          allocate(DstInputData%DeltaLdot(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -4232,16 +4453,16 @@ subroutine MD_DestroyInput(InputData, ErrStat, ErrMsg)
    type(MD_InputType), intent(inout) :: InputData
    integer(IntKi),  intent(  out) :: ErrStat
    character(*),    intent(  out) :: ErrMsg
-   integer(B8Ki)   :: i1
-   integer(B8Ki)   :: LB(1), UB(1)
+   integer(B4Ki)   :: i1
+   integer(B4Ki)   :: LB(1), UB(1)
    integer(IntKi)                 :: ErrStat2
    character(ErrMsgLen)           :: ErrMsg2
    character(*), parameter        :: RoutineName = 'MD_DestroyInput'
    ErrStat = ErrID_None
    ErrMsg  = ''
    if (allocated(InputData%CoupledKinematics)) then
-      LB(1:1) = lbound(InputData%CoupledKinematics, kind=B8Ki)
-      UB(1:1) = ubound(InputData%CoupledKinematics, kind=B8Ki)
+      LB(1:1) = lbound(InputData%CoupledKinematics)
+      UB(1:1) = ubound(InputData%CoupledKinematics)
       do i1 = LB(1), UB(1)
          call MeshDestroy( InputData%CoupledKinematics(i1), ErrStat2, ErrMsg2)
          call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
@@ -4260,14 +4481,14 @@ subroutine MD_PackInput(RF, Indata)
    type(RegFile), intent(inout) :: RF
    type(MD_InputType), intent(in) :: InData
    character(*), parameter         :: RoutineName = 'MD_PackInput'
-   integer(B8Ki)   :: i1
-   integer(B8Ki)   :: LB(1), UB(1)
+   integer(B4Ki)   :: i1
+   integer(B4Ki)   :: LB(1), UB(1)
    if (RF%ErrStat >= AbortErrLev) return
    call RegPack(RF, allocated(InData%CoupledKinematics))
    if (allocated(InData%CoupledKinematics)) then
-      call RegPackBounds(RF, 1, lbound(InData%CoupledKinematics, kind=B8Ki), ubound(InData%CoupledKinematics, kind=B8Ki))
-      LB(1:1) = lbound(InData%CoupledKinematics, kind=B8Ki)
-      UB(1:1) = ubound(InData%CoupledKinematics, kind=B8Ki)
+      call RegPackBounds(RF, 1, lbound(InData%CoupledKinematics), ubound(InData%CoupledKinematics))
+      LB(1:1) = lbound(InData%CoupledKinematics)
+      UB(1:1) = ubound(InData%CoupledKinematics)
       do i1 = LB(1), UB(1)
          call MeshPack(RF, InData%CoupledKinematics(i1)) 
       end do
@@ -4281,8 +4502,8 @@ subroutine MD_UnPackInput(RF, OutData)
    type(RegFile), intent(inout)    :: RF
    type(MD_InputType), intent(inout) :: OutData
    character(*), parameter            :: RoutineName = 'MD_UnPackInput'
-   integer(B8Ki)   :: i1
-   integer(B8Ki)   :: LB(1), UB(1)
+   integer(B4Ki)   :: i1
+   integer(B4Ki)   :: LB(1), UB(1)
    integer(IntKi)  :: stat
    logical         :: IsAllocAssoc
    if (RF%ErrStat /= ErrID_None) return
@@ -4309,16 +4530,16 @@ subroutine MD_CopyOutput(SrcOutputData, DstOutputData, CtrlCode, ErrStat, ErrMsg
    integer(IntKi),  intent(in   ) :: CtrlCode
    integer(IntKi),  intent(  out) :: ErrStat
    character(*),    intent(  out) :: ErrMsg
-   integer(B8Ki)   :: i1
-   integer(B8Ki)                  :: LB(1), UB(1)
+   integer(B4Ki)   :: i1
+   integer(B4Ki)                  :: LB(1), UB(1)
    integer(IntKi)                 :: ErrStat2
    character(ErrMsgLen)           :: ErrMsg2
    character(*), parameter        :: RoutineName = 'MD_CopyOutput'
    ErrStat = ErrID_None
    ErrMsg  = ''
    if (allocated(SrcOutputData%CoupledLoads)) then
-      LB(1:1) = lbound(SrcOutputData%CoupledLoads, kind=B8Ki)
-      UB(1:1) = ubound(SrcOutputData%CoupledLoads, kind=B8Ki)
+      LB(1:1) = lbound(SrcOutputData%CoupledLoads)
+      UB(1:1) = ubound(SrcOutputData%CoupledLoads)
       if (.not. allocated(DstOutputData%CoupledLoads)) then
          allocate(DstOutputData%CoupledLoads(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -4333,8 +4554,8 @@ subroutine MD_CopyOutput(SrcOutputData, DstOutputData, CtrlCode, ErrStat, ErrMsg
       end do
    end if
    if (allocated(SrcOutputData%WriteOutput)) then
-      LB(1:1) = lbound(SrcOutputData%WriteOutput, kind=B8Ki)
-      UB(1:1) = ubound(SrcOutputData%WriteOutput, kind=B8Ki)
+      LB(1:1) = lbound(SrcOutputData%WriteOutput)
+      UB(1:1) = ubound(SrcOutputData%WriteOutput)
       if (.not. allocated(DstOutputData%WriteOutput)) then
          allocate(DstOutputData%WriteOutput(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -4345,8 +4566,8 @@ subroutine MD_CopyOutput(SrcOutputData, DstOutputData, CtrlCode, ErrStat, ErrMsg
       DstOutputData%WriteOutput = SrcOutputData%WriteOutput
    end if
    if (allocated(SrcOutputData%VisLinesMesh)) then
-      LB(1:1) = lbound(SrcOutputData%VisLinesMesh, kind=B8Ki)
-      UB(1:1) = ubound(SrcOutputData%VisLinesMesh, kind=B8Ki)
+      LB(1:1) = lbound(SrcOutputData%VisLinesMesh)
+      UB(1:1) = ubound(SrcOutputData%VisLinesMesh)
       if (.not. allocated(DstOutputData%VisLinesMesh)) then
          allocate(DstOutputData%VisLinesMesh(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -4361,8 +4582,8 @@ subroutine MD_CopyOutput(SrcOutputData, DstOutputData, CtrlCode, ErrStat, ErrMsg
       end do
    end if
    if (allocated(SrcOutputData%VisRodsMesh)) then
-      LB(1:1) = lbound(SrcOutputData%VisRodsMesh, kind=B8Ki)
-      UB(1:1) = ubound(SrcOutputData%VisRodsMesh, kind=B8Ki)
+      LB(1:1) = lbound(SrcOutputData%VisRodsMesh)
+      UB(1:1) = ubound(SrcOutputData%VisRodsMesh)
       if (.not. allocated(DstOutputData%VisRodsMesh)) then
          allocate(DstOutputData%VisRodsMesh(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -4377,8 +4598,8 @@ subroutine MD_CopyOutput(SrcOutputData, DstOutputData, CtrlCode, ErrStat, ErrMsg
       end do
    end if
    if (allocated(SrcOutputData%VisBodiesMesh)) then
-      LB(1:1) = lbound(SrcOutputData%VisBodiesMesh, kind=B8Ki)
-      UB(1:1) = ubound(SrcOutputData%VisBodiesMesh, kind=B8Ki)
+      LB(1:1) = lbound(SrcOutputData%VisBodiesMesh)
+      UB(1:1) = ubound(SrcOutputData%VisBodiesMesh)
       if (.not. allocated(DstOutputData%VisBodiesMesh)) then
          allocate(DstOutputData%VisBodiesMesh(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -4393,8 +4614,8 @@ subroutine MD_CopyOutput(SrcOutputData, DstOutputData, CtrlCode, ErrStat, ErrMsg
       end do
    end if
    if (allocated(SrcOutputData%VisAnchsMesh)) then
-      LB(1:1) = lbound(SrcOutputData%VisAnchsMesh, kind=B8Ki)
-      UB(1:1) = ubound(SrcOutputData%VisAnchsMesh, kind=B8Ki)
+      LB(1:1) = lbound(SrcOutputData%VisAnchsMesh)
+      UB(1:1) = ubound(SrcOutputData%VisAnchsMesh)
       if (.not. allocated(DstOutputData%VisAnchsMesh)) then
          allocate(DstOutputData%VisAnchsMesh(LB(1):UB(1)), stat=ErrStat2)
          if (ErrStat2 /= 0) then
@@ -4414,16 +4635,16 @@ subroutine MD_DestroyOutput(OutputData, ErrStat, ErrMsg)
    type(MD_OutputType), intent(inout) :: OutputData
    integer(IntKi),  intent(  out) :: ErrStat
    character(*),    intent(  out) :: ErrMsg
-   integer(B8Ki)   :: i1
-   integer(B8Ki)   :: LB(1), UB(1)
+   integer(B4Ki)   :: i1
+   integer(B4Ki)   :: LB(1), UB(1)
    integer(IntKi)                 :: ErrStat2
    character(ErrMsgLen)           :: ErrMsg2
    character(*), parameter        :: RoutineName = 'MD_DestroyOutput'
    ErrStat = ErrID_None
    ErrMsg  = ''
    if (allocated(OutputData%CoupledLoads)) then
-      LB(1:1) = lbound(OutputData%CoupledLoads, kind=B8Ki)
-      UB(1:1) = ubound(OutputData%CoupledLoads, kind=B8Ki)
+      LB(1:1) = lbound(OutputData%CoupledLoads)
+      UB(1:1) = ubound(OutputData%CoupledLoads)
       do i1 = LB(1), UB(1)
          call MeshDestroy( OutputData%CoupledLoads(i1), ErrStat2, ErrMsg2)
          call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
@@ -4434,8 +4655,8 @@ subroutine MD_DestroyOutput(OutputData, ErrStat, ErrMsg)
       deallocate(OutputData%WriteOutput)
    end if
    if (allocated(OutputData%VisLinesMesh)) then
-      LB(1:1) = lbound(OutputData%VisLinesMesh, kind=B8Ki)
-      UB(1:1) = ubound(OutputData%VisLinesMesh, kind=B8Ki)
+      LB(1:1) = lbound(OutputData%VisLinesMesh)
+      UB(1:1) = ubound(OutputData%VisLinesMesh)
       do i1 = LB(1), UB(1)
          call MeshDestroy( OutputData%VisLinesMesh(i1), ErrStat2, ErrMsg2)
          call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
@@ -4443,8 +4664,8 @@ subroutine MD_DestroyOutput(OutputData, ErrStat, ErrMsg)
       deallocate(OutputData%VisLinesMesh)
    end if
    if (allocated(OutputData%VisRodsMesh)) then
-      LB(1:1) = lbound(OutputData%VisRodsMesh, kind=B8Ki)
-      UB(1:1) = ubound(OutputData%VisRodsMesh, kind=B8Ki)
+      LB(1:1) = lbound(OutputData%VisRodsMesh)
+      UB(1:1) = ubound(OutputData%VisRodsMesh)
       do i1 = LB(1), UB(1)
          call MeshDestroy( OutputData%VisRodsMesh(i1), ErrStat2, ErrMsg2)
          call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
@@ -4452,8 +4673,8 @@ subroutine MD_DestroyOutput(OutputData, ErrStat, ErrMsg)
       deallocate(OutputData%VisRodsMesh)
    end if
    if (allocated(OutputData%VisBodiesMesh)) then
-      LB(1:1) = lbound(OutputData%VisBodiesMesh, kind=B8Ki)
-      UB(1:1) = ubound(OutputData%VisBodiesMesh, kind=B8Ki)
+      LB(1:1) = lbound(OutputData%VisBodiesMesh)
+      UB(1:1) = ubound(OutputData%VisBodiesMesh)
       do i1 = LB(1), UB(1)
          call MeshDestroy( OutputData%VisBodiesMesh(i1), ErrStat2, ErrMsg2)
          call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
@@ -4461,8 +4682,8 @@ subroutine MD_DestroyOutput(OutputData, ErrStat, ErrMsg)
       deallocate(OutputData%VisBodiesMesh)
    end if
    if (allocated(OutputData%VisAnchsMesh)) then
-      LB(1:1) = lbound(OutputData%VisAnchsMesh, kind=B8Ki)
-      UB(1:1) = ubound(OutputData%VisAnchsMesh, kind=B8Ki)
+      LB(1:1) = lbound(OutputData%VisAnchsMesh)
+      UB(1:1) = ubound(OutputData%VisAnchsMesh)
       do i1 = LB(1), UB(1)
          call MeshDestroy( OutputData%VisAnchsMesh(i1), ErrStat2, ErrMsg2)
          call SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg, RoutineName)
@@ -4475,14 +4696,14 @@ subroutine MD_PackOutput(RF, Indata)
    type(RegFile), intent(inout) :: RF
    type(MD_OutputType), intent(in) :: InData
    character(*), parameter         :: RoutineName = 'MD_PackOutput'
-   integer(B8Ki)   :: i1
-   integer(B8Ki)   :: LB(1), UB(1)
+   integer(B4Ki)   :: i1
+   integer(B4Ki)   :: LB(1), UB(1)
    if (RF%ErrStat >= AbortErrLev) return
    call RegPack(RF, allocated(InData%CoupledLoads))
    if (allocated(InData%CoupledLoads)) then
-      call RegPackBounds(RF, 1, lbound(InData%CoupledLoads, kind=B8Ki), ubound(InData%CoupledLoads, kind=B8Ki))
-      LB(1:1) = lbound(InData%CoupledLoads, kind=B8Ki)
-      UB(1:1) = ubound(InData%CoupledLoads, kind=B8Ki)
+      call RegPackBounds(RF, 1, lbound(InData%CoupledLoads), ubound(InData%CoupledLoads))
+      LB(1:1) = lbound(InData%CoupledLoads)
+      UB(1:1) = ubound(InData%CoupledLoads)
       do i1 = LB(1), UB(1)
          call MeshPack(RF, InData%CoupledLoads(i1)) 
       end do
@@ -4490,36 +4711,36 @@ subroutine MD_PackOutput(RF, Indata)
    call RegPackAlloc(RF, InData%WriteOutput)
    call RegPack(RF, allocated(InData%VisLinesMesh))
    if (allocated(InData%VisLinesMesh)) then
-      call RegPackBounds(RF, 1, lbound(InData%VisLinesMesh, kind=B8Ki), ubound(InData%VisLinesMesh, kind=B8Ki))
-      LB(1:1) = lbound(InData%VisLinesMesh, kind=B8Ki)
-      UB(1:1) = ubound(InData%VisLinesMesh, kind=B8Ki)
+      call RegPackBounds(RF, 1, lbound(InData%VisLinesMesh), ubound(InData%VisLinesMesh))
+      LB(1:1) = lbound(InData%VisLinesMesh)
+      UB(1:1) = ubound(InData%VisLinesMesh)
       do i1 = LB(1), UB(1)
          call MeshPack(RF, InData%VisLinesMesh(i1)) 
       end do
    end if
    call RegPack(RF, allocated(InData%VisRodsMesh))
    if (allocated(InData%VisRodsMesh)) then
-      call RegPackBounds(RF, 1, lbound(InData%VisRodsMesh, kind=B8Ki), ubound(InData%VisRodsMesh, kind=B8Ki))
-      LB(1:1) = lbound(InData%VisRodsMesh, kind=B8Ki)
-      UB(1:1) = ubound(InData%VisRodsMesh, kind=B8Ki)
+      call RegPackBounds(RF, 1, lbound(InData%VisRodsMesh), ubound(InData%VisRodsMesh))
+      LB(1:1) = lbound(InData%VisRodsMesh)
+      UB(1:1) = ubound(InData%VisRodsMesh)
       do i1 = LB(1), UB(1)
          call MeshPack(RF, InData%VisRodsMesh(i1)) 
       end do
    end if
    call RegPack(RF, allocated(InData%VisBodiesMesh))
    if (allocated(InData%VisBodiesMesh)) then
-      call RegPackBounds(RF, 1, lbound(InData%VisBodiesMesh, kind=B8Ki), ubound(InData%VisBodiesMesh, kind=B8Ki))
-      LB(1:1) = lbound(InData%VisBodiesMesh, kind=B8Ki)
-      UB(1:1) = ubound(InData%VisBodiesMesh, kind=B8Ki)
+      call RegPackBounds(RF, 1, lbound(InData%VisBodiesMesh), ubound(InData%VisBodiesMesh))
+      LB(1:1) = lbound(InData%VisBodiesMesh)
+      UB(1:1) = ubound(InData%VisBodiesMesh)
       do i1 = LB(1), UB(1)
          call MeshPack(RF, InData%VisBodiesMesh(i1)) 
       end do
    end if
    call RegPack(RF, allocated(InData%VisAnchsMesh))
    if (allocated(InData%VisAnchsMesh)) then
-      call RegPackBounds(RF, 1, lbound(InData%VisAnchsMesh, kind=B8Ki), ubound(InData%VisAnchsMesh, kind=B8Ki))
-      LB(1:1) = lbound(InData%VisAnchsMesh, kind=B8Ki)
-      UB(1:1) = ubound(InData%VisAnchsMesh, kind=B8Ki)
+      call RegPackBounds(RF, 1, lbound(InData%VisAnchsMesh), ubound(InData%VisAnchsMesh))
+      LB(1:1) = lbound(InData%VisAnchsMesh)
+      UB(1:1) = ubound(InData%VisAnchsMesh)
       do i1 = LB(1), UB(1)
          call MeshPack(RF, InData%VisAnchsMesh(i1)) 
       end do
@@ -4531,8 +4752,8 @@ subroutine MD_UnPackOutput(RF, OutData)
    type(RegFile), intent(inout)    :: RF
    type(MD_OutputType), intent(inout) :: OutData
    character(*), parameter            :: RoutineName = 'MD_UnPackOutput'
-   integer(B8Ki)   :: i1
-   integer(B8Ki)   :: LB(1), UB(1)
+   integer(B4Ki)   :: i1
+   integer(B4Ki)   :: LB(1), UB(1)
    integer(IntKi)  :: stat
    logical         :: IsAllocAssoc
    if (RF%ErrStat /= ErrID_None) return
@@ -4702,7 +4923,7 @@ SUBROUTINE MD_Input_ExtrapInterp1(u1, u2, tin, u_out, tin_out, ErrStat, ErrMsg )
    a2 = t_out/t(2)
    
    IF (ALLOCATED(u_out%CoupledKinematics) .AND. ALLOCATED(u1%CoupledKinematics)) THEN
-      DO i1 = LBOUND(u_out%CoupledKinematics,1, kind=B8Ki),UBOUND(u_out%CoupledKinematics,1, kind=B8Ki)
+      do i1 = lbound(u_out%CoupledKinematics,1),ubound(u_out%CoupledKinematics,1)
          CALL MeshExtrapInterp1(u1%CoupledKinematics(i1), u2%CoupledKinematics(i1), tin, u_out%CoupledKinematics(i1), tin_out, ErrStat2, ErrMsg2)
             CALL SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg,RoutineName)
       END DO
@@ -4771,7 +4992,7 @@ SUBROUTINE MD_Input_ExtrapInterp2(u1, u2, u3, tin, u_out, tin_out, ErrStat, ErrM
    a2 = (t_out - t(1))*(t_out - t(3))/((t(2) - t(1))*(t(2) - t(3)))
    a3 = (t_out - t(1))*(t_out - t(2))/((t(3) - t(1))*(t(3) - t(2)))
    IF (ALLOCATED(u_out%CoupledKinematics) .AND. ALLOCATED(u1%CoupledKinematics)) THEN
-      DO i1 = LBOUND(u_out%CoupledKinematics,1, kind=B8Ki),UBOUND(u_out%CoupledKinematics,1, kind=B8Ki)
+      do i1 = lbound(u_out%CoupledKinematics,1),ubound(u_out%CoupledKinematics,1)
          CALL MeshExtrapInterp2(u1%CoupledKinematics(i1), u2%CoupledKinematics(i1), u3%CoupledKinematics(i1), tin, u_out%CoupledKinematics(i1), tin_out, ErrStat2, ErrMsg2)
             CALL SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg,RoutineName)
       END DO
@@ -4882,7 +5103,7 @@ SUBROUTINE MD_Output_ExtrapInterp1(y1, y2, tin, y_out, tin_out, ErrStat, ErrMsg 
    a2 = t_out/t(2)
    
    IF (ALLOCATED(y_out%CoupledLoads) .AND. ALLOCATED(y1%CoupledLoads)) THEN
-      DO i1 = LBOUND(y_out%CoupledLoads,1, kind=B8Ki),UBOUND(y_out%CoupledLoads,1, kind=B8Ki)
+      do i1 = lbound(y_out%CoupledLoads,1),ubound(y_out%CoupledLoads,1)
          CALL MeshExtrapInterp1(y1%CoupledLoads(i1), y2%CoupledLoads(i1), tin, y_out%CoupledLoads(i1), tin_out, ErrStat2, ErrMsg2)
             CALL SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg,RoutineName)
       END DO
@@ -4891,25 +5112,25 @@ SUBROUTINE MD_Output_ExtrapInterp1(y1, y2, tin, y_out, tin_out, ErrStat, ErrMsg 
       y_out%WriteOutput = a1*y1%WriteOutput + a2*y2%WriteOutput
    END IF ! check if allocated
    IF (ALLOCATED(y_out%VisLinesMesh) .AND. ALLOCATED(y1%VisLinesMesh)) THEN
-      DO i1 = LBOUND(y_out%VisLinesMesh,1, kind=B8Ki),UBOUND(y_out%VisLinesMesh,1, kind=B8Ki)
+      do i1 = lbound(y_out%VisLinesMesh,1),ubound(y_out%VisLinesMesh,1)
          CALL MeshExtrapInterp1(y1%VisLinesMesh(i1), y2%VisLinesMesh(i1), tin, y_out%VisLinesMesh(i1), tin_out, ErrStat2, ErrMsg2)
             CALL SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg,RoutineName)
       END DO
    END IF ! check if allocated
    IF (ALLOCATED(y_out%VisRodsMesh) .AND. ALLOCATED(y1%VisRodsMesh)) THEN
-      DO i1 = LBOUND(y_out%VisRodsMesh,1, kind=B8Ki),UBOUND(y_out%VisRodsMesh,1, kind=B8Ki)
+      do i1 = lbound(y_out%VisRodsMesh,1),ubound(y_out%VisRodsMesh,1)
          CALL MeshExtrapInterp1(y1%VisRodsMesh(i1), y2%VisRodsMesh(i1), tin, y_out%VisRodsMesh(i1), tin_out, ErrStat2, ErrMsg2)
             CALL SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg,RoutineName)
       END DO
    END IF ! check if allocated
    IF (ALLOCATED(y_out%VisBodiesMesh) .AND. ALLOCATED(y1%VisBodiesMesh)) THEN
-      DO i1 = LBOUND(y_out%VisBodiesMesh,1, kind=B8Ki),UBOUND(y_out%VisBodiesMesh,1, kind=B8Ki)
+      do i1 = lbound(y_out%VisBodiesMesh,1),ubound(y_out%VisBodiesMesh,1)
          CALL MeshExtrapInterp1(y1%VisBodiesMesh(i1), y2%VisBodiesMesh(i1), tin, y_out%VisBodiesMesh(i1), tin_out, ErrStat2, ErrMsg2)
             CALL SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg,RoutineName)
       END DO
    END IF ! check if allocated
    IF (ALLOCATED(y_out%VisAnchsMesh) .AND. ALLOCATED(y1%VisAnchsMesh)) THEN
-      DO i1 = LBOUND(y_out%VisAnchsMesh,1, kind=B8Ki),UBOUND(y_out%VisAnchsMesh,1, kind=B8Ki)
+      do i1 = lbound(y_out%VisAnchsMesh,1),ubound(y_out%VisAnchsMesh,1)
          CALL MeshExtrapInterp1(y1%VisAnchsMesh(i1), y2%VisAnchsMesh(i1), tin, y_out%VisAnchsMesh(i1), tin_out, ErrStat2, ErrMsg2)
             CALL SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg,RoutineName)
       END DO
@@ -4972,7 +5193,7 @@ SUBROUTINE MD_Output_ExtrapInterp2(y1, y2, y3, tin, y_out, tin_out, ErrStat, Err
    a2 = (t_out - t(1))*(t_out - t(3))/((t(2) - t(1))*(t(2) - t(3)))
    a3 = (t_out - t(1))*(t_out - t(2))/((t(3) - t(1))*(t(3) - t(2)))
    IF (ALLOCATED(y_out%CoupledLoads) .AND. ALLOCATED(y1%CoupledLoads)) THEN
-      DO i1 = LBOUND(y_out%CoupledLoads,1, kind=B8Ki),UBOUND(y_out%CoupledLoads,1, kind=B8Ki)
+      do i1 = lbound(y_out%CoupledLoads,1),ubound(y_out%CoupledLoads,1)
          CALL MeshExtrapInterp2(y1%CoupledLoads(i1), y2%CoupledLoads(i1), y3%CoupledLoads(i1), tin, y_out%CoupledLoads(i1), tin_out, ErrStat2, ErrMsg2)
             CALL SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg,RoutineName)
       END DO
@@ -4981,25 +5202,25 @@ SUBROUTINE MD_Output_ExtrapInterp2(y1, y2, y3, tin, y_out, tin_out, ErrStat, Err
       y_out%WriteOutput = a1*y1%WriteOutput + a2*y2%WriteOutput + a3*y3%WriteOutput
    END IF ! check if allocated
    IF (ALLOCATED(y_out%VisLinesMesh) .AND. ALLOCATED(y1%VisLinesMesh)) THEN
-      DO i1 = LBOUND(y_out%VisLinesMesh,1, kind=B8Ki),UBOUND(y_out%VisLinesMesh,1, kind=B8Ki)
+      do i1 = lbound(y_out%VisLinesMesh,1),ubound(y_out%VisLinesMesh,1)
          CALL MeshExtrapInterp2(y1%VisLinesMesh(i1), y2%VisLinesMesh(i1), y3%VisLinesMesh(i1), tin, y_out%VisLinesMesh(i1), tin_out, ErrStat2, ErrMsg2)
             CALL SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg,RoutineName)
       END DO
    END IF ! check if allocated
    IF (ALLOCATED(y_out%VisRodsMesh) .AND. ALLOCATED(y1%VisRodsMesh)) THEN
-      DO i1 = LBOUND(y_out%VisRodsMesh,1, kind=B8Ki),UBOUND(y_out%VisRodsMesh,1, kind=B8Ki)
+      do i1 = lbound(y_out%VisRodsMesh,1),ubound(y_out%VisRodsMesh,1)
          CALL MeshExtrapInterp2(y1%VisRodsMesh(i1), y2%VisRodsMesh(i1), y3%VisRodsMesh(i1), tin, y_out%VisRodsMesh(i1), tin_out, ErrStat2, ErrMsg2)
             CALL SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg,RoutineName)
       END DO
    END IF ! check if allocated
    IF (ALLOCATED(y_out%VisBodiesMesh) .AND. ALLOCATED(y1%VisBodiesMesh)) THEN
-      DO i1 = LBOUND(y_out%VisBodiesMesh,1, kind=B8Ki),UBOUND(y_out%VisBodiesMesh,1, kind=B8Ki)
+      do i1 = lbound(y_out%VisBodiesMesh,1),ubound(y_out%VisBodiesMesh,1)
          CALL MeshExtrapInterp2(y1%VisBodiesMesh(i1), y2%VisBodiesMesh(i1), y3%VisBodiesMesh(i1), tin, y_out%VisBodiesMesh(i1), tin_out, ErrStat2, ErrMsg2)
             CALL SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg,RoutineName)
       END DO
    END IF ! check if allocated
    IF (ALLOCATED(y_out%VisAnchsMesh) .AND. ALLOCATED(y1%VisAnchsMesh)) THEN
-      DO i1 = LBOUND(y_out%VisAnchsMesh,1, kind=B8Ki),UBOUND(y_out%VisAnchsMesh,1, kind=B8Ki)
+      do i1 = lbound(y_out%VisAnchsMesh,1),ubound(y_out%VisAnchsMesh,1)
          CALL MeshExtrapInterp2(y1%VisAnchsMesh(i1), y2%VisAnchsMesh(i1), y3%VisAnchsMesh(i1), tin, y_out%VisAnchsMesh(i1), tin_out, ErrStat2, ErrMsg2)
             CALL SetErrStat(ErrStat2, ErrMsg2, ErrStat, ErrMsg,RoutineName)
       END DO
